@@ -20,17 +20,28 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
+      - name: Require tag on main HEAD
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+
+          if [[ "$GITHUB_SHA" != "$MAIN_SHA" ]]; then
+            echo "Release tag must point to the current origin/main HEAD"
+            echo "tag commit:  $GITHUB_SHA"
+            echo "main head:   $MAIN_SHA"
+            exit 1
+          fi
+
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24"
           cache: "pnpm"

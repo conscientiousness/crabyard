@@ -19,7 +19,9 @@ Expected flow:
 1. Set the release version in `package.json` and `src/shared.ts`, for example `2026.4.1`.
 2. Run `pnpm run release:check`.
 3. Commit the release version.
-4. Push a matching tag such as `v2026.4.1`.
-5. GitHub Actions validates the tag/version match, publishes to npm, and creates the GitHub release.
+4. Push a matching tag such as `v2026.4.1` on the current `main` HEAD commit.
+5. GitHub Actions validates the tag format, version match, and `main` HEAD requirement before publishing to npm and creating the GitHub release.
 
 Before the first real publish, configure npm trusted publishing for this repository on npmjs.com.
+
+Both workflows pin third-party actions to full commit SHAs, with the audited release version noted in comments for updates.

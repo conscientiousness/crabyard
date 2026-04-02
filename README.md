@@ -6,10 +6,8 @@
   </picture>
 </p>
 
-<h1 align="center">Crabyard</h1>
-
 <p align="center">
-  <strong>Keep coding agents aligned as your repo evolves.</strong>
+  <strong>Help coding agents evolve with your repo</strong>
 </p>
 
 <p align="center">
@@ -21,9 +19,6 @@
   </a>
   <a href="https://www.npmjs.com/package/crabyard">
     <img src="https://img.shields.io/npm/v/crabyard?style=for-the-badge" alt="npm version">
-  </a>
-  <a href="https://www.npmjs.com/package/crabyard">
-    <img src="https://img.shields.io/node/v/crabyard?style=for-the-badge" alt="Node.js version">
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License">
@@ -37,10 +32,52 @@
   ·
   <a href="#install">Install</a>
   ·
-  <a href="#getting-started">Getting Started</a>
+  <a href="#quick-start">Quick Start</a>
   ·
   <a href="#cli-commands">CLI Commands</a>
 </p>
+
+## Install
+
+Install the published CLI:
+
+```bash
+npm install -g crabyard
+```
+
+If you would rather not install it globally, use:
+
+```bash
+npx crabyard@latest --help
+```
+
+## Quick Start
+
+Once `crabyard` is available on your PATH, start with:
+
+```bash
+crabyard init /absolute/path/to/repo
+crabyard validate --repo /absolute/path/to/repo
+crabyard status --repo /absolute/path/to/repo
+crabyard status add-auth --repo /absolute/path/to/repo --json
+crabyard verify add-auth --repo /absolute/path/to/repo
+crabyard sync add-auth --repo /absolute/path/to/repo
+crabyard archive add-auth --repo /absolute/path/to/repo
+```
+
+A normal first loop looks like this:
+
+1. `crabyard init /absolute/path/to/repo`
+2. ask your agent tool to create `crabyard/changes/<slug>/`
+3. let the agent write `proposal.md`, `design.md`, `tasks.md`, `execution.yaml`
+4. run `crabyard validate change <slug> --repo /absolute/path/to/repo`
+5. let the agent use `crabyard status <slug> --repo /absolute/path/to/repo --json`
+6. implement from the ready frontier
+7. run `verify`, `sync`, `verify`, `archive`
+
+If you prefer `npx`, replace `crabyard` in the examples above with `npx crabyard@latest`.
+
+Any agent tool that supports repo-local Skills can use this workflow.
 
 Crabyard started from a simple observation: once you use coding agents seriously, the hard part is usually not getting them to write code. The hard part is keeping the repo understandable from one session to the next.
 
@@ -59,7 +96,7 @@ Concretely, it keeps these things separate:
 That creates a much cleaner loop for agent-assisted development:
 
 ```text
-You -> ask Codex/OpenCode for a change
+You -> ask your agent tool for a change
      |
      v
 crabyard plan/change bundle
@@ -92,64 +129,6 @@ The point is not documentation for its own sake. The point is to make agents mor
 - preserving reusable knowledge
 
 The most important design choice is explicit execution graphs in `execution.yaml`. `tasks.md` stays readable for humans, while scheduling, dependencies, write ownership, and verification metadata stay machine-checkable.
-
-## What The Agent Actually Gets
-
-From the agent's side, the payoff is very concrete. Crabyard turns repo state into a few stable questions with stable answers. Instead of reconstructing intent from chat, the agent can validate the change bundle, inspect the current frontier, and see what still has to happen before work can close.
-
-In practice, that usually means:
-
-- deterministic validation for change bundles
-- `status --json` for repo and change state
-- execution frontier data with ready and blocked units
-- typed verification metadata with legacy shorthand compatibility
-- repo-local skills installed under `.agents/skills/`
-
-## Why This Feels Better With Codex/OpenCode
-
-Without Crabyard:
-
-```text
-prompt -> agent edits code -> you inspect diff -> prompt again -> hope context stays aligned
-```
-
-With Crabyard:
-
-```text
-prompt
-  -> change bundle
-  -> explicit execution graph
-  -> agent works against a known frontier
-  -> deterministic verify/sync/archive gates
-  -> reusable knowledge for the next task
-```
-
-That usually means:
-
-- less re-explaining the same task every session
-- fewer accidental edits outside intended ownership
-- easier handoff between planning, implementation, and review
-- much better visibility into "what should the agent do next?"
-
-## Design Goals
-
-Crabyard is intentionally small.
-
-It is not trying to become a giant framework, a plugin marketplace, or a full operating system for AI development. The idea is simpler than that: give one repo a clear working memory, a clear execution contract, and a clean way to preserve what it learns.
-
-That means keeping durable context inside the repo, separating readable planning from machine-checkable execution state, and making it obvious what is ready, what is blocked, and what is safe to close. If a workflow makes that harder instead of easier, it does not belong here.
-
-## How Crabyard Differs
-
-Projects like Compound Engineering and OpenSpec are doing real work in this space, and Crabyard borrows the core insight that AI-assisted development gets better when the repo itself carries more structure.
-
-The difference is mostly about scope.
-
-Compound Engineering is broader and more ecosystem-shaped. It spans more tools, more workflows, and more reusable process. That can be powerful. Crabyard is aimed at the case where you want less surface area, not more: one repo, one small contract, and a workflow that an agent can hold in its head without drifting.
-
-OpenSpec is closer in spirit, but it still reaches for a fuller spec framework. Crabyard takes a narrower bet. Most teams do not need more lifecycle concepts. They need fewer moving parts, stronger execution truth, and a way to keep accepted product knowledge from dissolving back into chat history.
-
-So the pitch is straightforward: if you want a system that is easier to keep in context, easier to evolve with the project, and more likely to make the repo stronger over time, Crabyard is intentionally built as the smaller layer.
 
 ## Workflow
 
@@ -257,12 +236,12 @@ That split is deliberate: skills stay thin, and the CLI remains the source of tr
 
 ## How It Fits Into A Real Session
 
-The easiest way to think about Crabyard is as shared working memory that sits next to your normal agent chat. You still talk to Codex or OpenCode the same way. The difference is that the repo now has a clean place for the plan, the frontier, and the closure rules.
+The easiest way to think about Crabyard is as shared working memory that sits next to your normal agent workflow. The difference is that the repo now has a clean place for the plan, the frontier, and the closure rules.
 
 Typical setup:
 
 ```text
-1. You ask Codex/OpenCode for a feature or fix
+1. You ask your agent tool for a feature or fix
 2. The agent creates or updates crabyard/changes/<slug>/
 3. The agent reads tasks.md + execution.yaml instead of guessing execution order
 4. The agent uses status --json to decide what is ready now
@@ -369,7 +348,7 @@ The intended closure sequence is:
 
 ## Built-In Skills
 
-Crabyard installs a small set of repo-local skills under `.agents/skills/`. That is deliberate. You should be able to clone a repo, run `init`, and hand the agent the same small toolkit every time instead of depending on someone's global setup.
+Crabyard installs a small set of repo-local skills under `.agents/skills/`. Any agent tool that supports repo-local Skills can use them. That is deliberate. You should be able to clone a repo, run `init`, and hand the agent the same small toolkit every time instead of depending on someone's global setup.
 
 - `crabyard-research`
 - `crabyard-explore`
@@ -407,43 +386,3 @@ Crabyard keeps implementation and debugging notes in `crabyard/knowledge/`, but 
 - `crabyard-learn` checks overlap before creating a note and updates `knowledge/index.md`
 - `crabyard-refresh` supports targeted refresh, consolidation, replacement, and stale marking
 - `knowledge/index.md` stays retrieval-friendly and canonical
-
-## Install
-
-Install the published CLI:
-
-```bash
-npm install -g crabyard
-```
-
-If you would rather not install it globally, use:
-
-```bash
-npx crabyard@latest --help
-```
-
-## Getting Started
-
-Once `crabyard` is available on your PATH, start with:
-
-```bash
-crabyard init /absolute/path/to/repo
-crabyard validate --repo /absolute/path/to/repo
-crabyard status --repo /absolute/path/to/repo
-crabyard status add-auth --repo /absolute/path/to/repo --json
-crabyard verify add-auth --repo /absolute/path/to/repo
-crabyard sync add-auth --repo /absolute/path/to/repo
-crabyard archive add-auth --repo /absolute/path/to/repo
-```
-
-A normal first loop looks like this:
-
-1. `crabyard init /absolute/path/to/repo`
-2. ask Codex/OpenCode to create `crabyard/changes/<slug>/`
-3. let the agent write `proposal.md`, `design.md`, `tasks.md`, `execution.yaml`
-4. run `crabyard validate change <slug> --repo /absolute/path/to/repo`
-5. let the agent use `crabyard status <slug> --repo /absolute/path/to/repo --json`
-6. implement from the ready frontier
-7. run `verify`, `sync`, `verify`, `archive`
-
-If you prefer `npx`, replace `crabyard` in the examples above with `npx crabyard@latest`.
