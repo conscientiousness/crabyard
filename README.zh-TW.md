@@ -130,6 +130,8 @@ verify -> sync -> verify -> archive
 
 最關鍵的設計點，是把明確的執行圖放進 `execution.yaml`。`tasks.md` 依然保持給人閱讀，而排程、依賴、寫入所有權與驗證資料則保持可被機器檢查。
 
+Crabyard 的靈感有一部分來自 Compound Engineering 和 OpenSpec。差異主要在範圍：Crabyard 刻意做得更小，把上下文盡量留在專案裡，並專注在一套更容易跟著專案一路演進的執行規範。
+
 ## 工作流程
 
 這套流程故意保持精簡，目的就是讓人和 agent 都容易記住，也容易在上下文變髒之後重新進入。

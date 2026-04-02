@@ -130,6 +130,8 @@ The point is not documentation for its own sake. The point is to make agents mor
 
 The most important design choice is explicit execution graphs in `execution.yaml`. `tasks.md` stays readable for humans, while scheduling, dependencies, write ownership, and verification metadata stay machine-checkable.
 
+Crabyard was influenced by projects like Compound Engineering and OpenSpec. The difference is mostly one of scope: Crabyard stays deliberately smaller, keeps context inside the repo, and focuses on a simpler execution contract that is easier to carry forward as the project evolves.
+
 ## Workflow
 
 The workflow is short on purpose. It is meant to be easy to remember and easy to re-enter after context has gone stale.
