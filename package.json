@@ -42,7 +42,7 @@
     "build": "pnpm exec tsc -p tsconfig.json",
     "dev": "pnpm exec tsx src/index.ts",
     "install:local": "pnpm exec tsx src/index.ts install",
-    "test": "pnpm exec tsx --test test/**/*.test.ts",
+    "test": "pnpm exec tsx --test \"test/**/*.test.ts\"",
     "test:smoke": "pnpm build && node dist/index.js --help",
     "release:check": "pnpm build && pnpm test && npm pack --dry-run",
     "prepack": "pnpm build",
