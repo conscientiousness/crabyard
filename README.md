@@ -14,9 +14,6 @@
   <a href="https://github.com/conscientiousness/crabyard/actions/workflows/ci.yml?branch=main">
     <img src="https://img.shields.io/github/actions/workflow/status/conscientiousness/crabyard/ci.yml?branch=main&style=for-the-badge" alt="CI status">
   </a>
-  <a href="https://github.com/conscientiousness/crabyard/releases">
-    <img src="https://img.shields.io/github/v/release/conscientiousness/crabyard?include_prereleases&style=for-the-badge" alt="GitHub release">
-  </a>
   <a href="https://www.npmjs.com/package/crabyard">
     <img src="https://img.shields.io/npm/v/crabyard?style=for-the-badge" alt="npm version">
   </a>
