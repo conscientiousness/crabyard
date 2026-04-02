@@ -1,0 +1,60 @@
+{
+  "name": "crabyard",
+  "version": "2026.4.1",
+  "description": "Spec-driven, review-first Crabyard workflow CLI with explicit execution graphs",
+  "keywords": [
+    "agents",
+    "cli",
+    "codex",
+    "opencode",
+    "spec-driven",
+    "workflow"
+  ],
+  "author": "Crabyard Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/conscientiousness/crabyard.git"
+  },
+  "homepage": "https://github.com/conscientiousness/crabyard#readme",
+  "bugs": {
+    "url": "https://github.com/conscientiousness/crabyard/issues"
+  },
+  "type": "module",
+  "private": false,
+  "bin": {
+    "crabyard": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "README.zh-TW.md"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm exec tsc -p tsconfig.json",
+    "dev": "pnpm exec tsx src/index.ts",
+    "install:local": "pnpm exec tsx src/index.ts install",
+    "test": "pnpm exec tsx --test test/**/*.test.ts",
+    "test:smoke": "pnpm build && node dist/index.js --help",
+    "release:check": "pnpm build && pnpm test && npm pack --dry-run",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  }
+}

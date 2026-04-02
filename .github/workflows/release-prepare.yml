@@ -1,0 +1,112 @@
+name: Release (publish)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate CalVer tag and repo version
+        id: meta
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          if [[ ! "$TAG" =~ ^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$ ]]; then
+            echo "Release tag must use CalVer format: vYYYY.M.D"
+            exit 1
+          fi
+
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          SHARED_VERSION=$(node - <<'EOF'
+          const fs = require("fs");
+          const source = fs.readFileSync("src/shared.ts", "utf8");
+          const match = source.match(/PACKAGE_VERSION = "([^"]+)"/);
+          if (!match) {
+            console.error("Could not read PACKAGE_VERSION from src/shared.ts");
+            process.exit(1);
+          }
+          console.log(match[1]);
+          EOF
+          )
+
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "Tag version $VERSION does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+
+          if [[ "$VERSION" != "$SHARED_VERSION" ]]; then
+            echo "Tag version $VERSION does not match src/shared.ts PACKAGE_VERSION $SHARED_VERSION"
+            exit 1
+          fi
+
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release artifact
+        run: pnpm run release:check
+
+      - name: Check npm registry for existing version
+        id: npm-check
+        shell: bash
+        run: |
+          if npm view "${{ steps.meta.outputs.package_name }}@${{ steps.meta.outputs.version }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish package to npm
+        if: steps.npm-check.outputs.already_published != 'true'
+        run: npm publish --access public
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            echo "GitHub release already exists for ${{ steps.meta.outputs.tag }}"
+          else
+            gh release create "${{ steps.meta.outputs.tag }}" \
+              --title "${{ steps.meta.outputs.tag }}" \
+              --generate-notes \
+              --verify-tag
+          fi
