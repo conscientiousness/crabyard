@@ -382,6 +382,73 @@ test("init rejects removed global compatibility flags", async () => {
   assert.match(result.stderr, /Unknown flag: --skip-global/);
 });
 
+test("update refreshes managed repo assets and preserves manifest metadata", async () => {
+  const repoPath = await mkdtemp(join(tmpdir(), "crabyard-update-"));
+  const initResult = await run(repoPath, [
+    "init",
+    repoPath,
+    "--primary-docs",
+    "README.md,docs/guide.md",
+    "--tags",
+    "alpha,beta",
+  ]);
+  assert.equal(initResult.code, 0, initResult.stderr);
+
+  const targetSkillPath = join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md");
+  await writeFile(targetSkillPath, "# stale template\n", "utf8");
+
+  const updateResult = await run(repoPath, ["update", repoPath]);
+  assert.equal(updateResult.code, 0, updateResult.stderr);
+  assert.match(updateResult.stdout, /Update complete\./);
+
+  const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
+  assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
+
+  const manifest = await readFile(join(repoPath, "crabyard", "manifest.yaml"), "utf8");
+  assert.match(manifest, /source_docs:\n  - README\.md\n  - docs\/guide\.md\n/);
+  assert.match(manifest, /default_tags:\n  - alpha\n  - beta\n/);
+});
+
+test("update rejects --skip-repo", async () => {
+  const repoPath = await createInitializedRepo();
+  const result = await run(repoPath, ["update", repoPath, "--skip-repo"]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /does not support --skip-repo/i);
+});
+
+test("update replaces managed assets idempotently instead of appending", async () => {
+  const repoPath = await createInitializedRepo();
+  const targetSkillPath = join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md");
+  const agentsPath = join(repoPath, "AGENTS.md");
+
+  await writeFile(targetSkillPath, "# stale template\n# stale template\n", "utf8");
+  await writeFile(
+    agentsPath,
+    `# AI development guide
+
+<!-- crabyard:memory:start -->
+stale block
+<!-- crabyard:memory:end -->
+`,
+    "utf8",
+  );
+
+  const firstUpdate = await run(repoPath, ["update", repoPath]);
+  assert.equal(firstUpdate.code, 0, firstUpdate.stderr);
+
+  const secondUpdate = await run(repoPath, ["update", repoPath]);
+  assert.equal(secondUpdate.code, 0, secondUpdate.stderr);
+
+  const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
+  assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
+
+  const agentsContent = await readFile(agentsPath, "utf8");
+  assert.equal((agentsContent.match(/<!-- crabyard:memory:start -->/g) ?? []).length, 1);
+  assert.equal((agentsContent.match(/<!-- crabyard:memory:end -->/g) ?? []).length, 1);
+  assert.doesNotMatch(agentsContent, /stale block/);
+});
+
 test("manifest paths must stay inside the repo root", async () => {
   const repoPath = await createInitializedRepo();
   const manifestPath = join(repoPath, "crabyard", "manifest.yaml");

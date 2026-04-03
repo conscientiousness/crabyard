@@ -64,6 +64,8 @@ const manifestSchema = z
     instructions_file: z.string().trim().min(1).optional(),
     specs_root: z.string().trim().min(1).optional(),
     changes_root: z.string().trim().min(1).optional(),
+    source_docs: z.array(z.string().trim().min(1)).optional(),
+    default_tags: z.array(z.string().trim().min(1)).optional(),
     knowledge: z
       .object({
         root: z.string().trim().min(1).optional(),
@@ -238,6 +240,9 @@ async function dispatch(argv: string[], io: CliIO) {
     case "install":
       await runInit(rest, io);
       return;
+    case "update":
+      await runUpdate(rest, io);
+      return;
     case "list":
       await runList(rest, io);
       return;
@@ -274,6 +279,7 @@ Usage:
 Commands:
   init [repo-path] [options]               Bootstrap Crabyard into a repo
   install [repo-path] [options]            Alias for init
+  update [repo-path] [options]             Refresh managed Crabyard repo assets
   list [all|specs|changes|knowledge]       List tracked repo artifacts
   show <target> [name]                     Show manifest, project, spec, change, or knowledge
   validate [repo]                          Validate the repo structure and active changes
@@ -293,6 +299,7 @@ Targets for show:
 
 Examples:
   pnpm exec tsx src/index.ts init /absolute/path/to/repo
+  pnpm exec tsx src/index.ts update /absolute/path/to/repo
   node dist/index.js list specs --repo /absolute/path/to/repo
   node dist/index.js verify add-auth --repo /absolute/path/to/repo
   node dist/index.js sync add-auth --repo /absolute/path/to/repo
@@ -304,6 +311,11 @@ Init options:
   --skip-repo
   --dry-run
 
+Update options:
+  --primary-docs <comma-separated-paths>
+  --tags <comma-separated-tags>
+  --dry-run
+
 Common options:
   --repo <path>
   --json
@@ -313,14 +325,37 @@ Common options:
 }
 
 async function runInit(args: string[], io: CliIO) {
+  await runRepoAssetCommand("init", args, io);
+}
+
+async function runUpdate(args: string[], io: CliIO) {
+  await runRepoAssetCommand("update", args, io);
+}
+
+async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: CliIO) {
   const options = parseInstallArgs(args, io.cwd);
+  if (mode === "update" && options.skipRepo) {
+    throw new Error("The update command does not support --skip-repo.");
+  }
+
   const repoPath = resolve(options.repoPath);
   const repoName = basename(repoPath);
-  const primaryDocs = options.primaryDocs.length > 0 ? options.primaryDocs : await detectPrimaryDocs(repoPath);
-  const tags = options.tags.length > 0 ? options.tags : [toKebabCase(repoName)];
+  const existingMetadata = mode === "update" ? await readRepoInstallMetadata(repoPath) : null;
+  const primaryDocs =
+    options.primaryDocs.length > 0
+      ? options.primaryDocs
+      : (existingMetadata?.primaryDocs.length ?? 0) > 0
+        ? existingMetadata!.primaryDocs
+        : await detectPrimaryDocs(repoPath);
+  const tags =
+    options.tags.length > 0
+      ? options.tags
+      : (existingMetadata?.tags.length ?? 0) > 0
+        ? existingMetadata!.tags
+        : [toKebabCase(repoName)];
   const timestamp = createTimestamp();
 
-  io.stdout(`Initializing ${PRODUCT_NAME}`);
+  io.stdout(mode === "init" ? `Initializing ${PRODUCT_NAME}` : `Updating ${PRODUCT_NAME}`);
   io.stdout(`Repo: ${repoPath}`);
   io.stdout(`Source docs: ${primaryDocs.join(", ")}`);
   io.stdout(`Tags: ${tags.join(", ")}`);
@@ -336,7 +371,7 @@ async function runInit(args: string[], io: CliIO) {
     });
   }
 
-  io.stdout("Init complete.");
+  io.stdout(mode === "init" ? "Init complete." : "Update complete.");
 }
 
 async function runList(args: string[], io: CliIO) {
@@ -774,6 +809,28 @@ async function detectPrimaryDocs(repoPath: string): Promise<string[]> {
   }
 
   return result.length > 0 ? result : ["README.md"];
+}
+
+async function readRepoInstallMetadata(repoPath: string): Promise<{ primaryDocs: string[]; tags: string[] } | null> {
+  const manifestPath = join(repoPath, ROOT_DIRNAME, MANIFEST_FILE);
+  if (!(await pathExists(manifestPath))) {
+    return null;
+  }
+
+  const document = parseDocument(await readFile(manifestPath, "utf8"));
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid manifest.yaml: ${document.errors[0]?.message ?? "unknown YAML parse error"}`);
+  }
+
+  const parsed = manifestSchema.safeParse(document.toJS());
+  if (!parsed.success) {
+    throw new Error(`Invalid manifest.yaml: ${parsed.error.issues[0]?.message ?? "schema validation failed"}`);
+  }
+
+  return {
+    primaryDocs: parsed.data.source_docs ?? [],
+    tags: parsed.data.default_tags ?? [],
+  };
 }
 
 export async function loadRepoContext(repoPath: string): Promise<RepoContext> {

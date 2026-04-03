@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Help coding agents evolve with your repo</strong>
+  <strong>Help coding agents evolve with your project</strong>
 </p>
 
 <p align="center">
@@ -60,6 +60,12 @@ crabyard status add-auth --repo /absolute/path/to/repo --json
 crabyard verify add-auth --repo /absolute/path/to/repo
 crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
+```
+
+After upgrading the CLI, refresh the managed templates in an existing repo with:
+
+```bash
+crabyard update /absolute/path/to/repo
 ```
 
 A normal first loop looks like this:
@@ -262,14 +268,11 @@ Agent:
   - closes with verify/sync/archive
 ```
 
-You do not need to think about Crabyard internals every day. What matters is that the repo has a much cleaner way to say how work should move.
-
 ## CLI Commands
-
-The command surface stays small on purpose. Most of the time you will bounce between `status`, `verify`, `sync`, and `archive`, while `init` and `validate` do the setup and guardrail work.
 
 - `init`: set up Crabyard files in a repo
 - `install`: alias for `init`
+- `update`: refresh managed repo assets and repo-local skills in an existing repo
 - `list`: show available changes in the repo
 - `show`: print one change bundle for inspection
 - `validate`: check repo or change structure before work continues

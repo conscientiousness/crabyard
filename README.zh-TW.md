@@ -62,6 +62,12 @@ crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
 ```
 
+CLI 升級後，如果要把既有 repo 的 managed templates 更新到最新版，可以執行：
+
+```bash
+crabyard update /absolute/path/to/repo
+```
+
 第一次上手，大概會走這樣一輪：
 
 1. `crabyard init /absolute/path/to/repo`
@@ -262,14 +268,11 @@ Agent:
   - 最後用 verify/sync/archive 結案
 ```
 
-你平常不需要在意 Crabyard 的內部細節。它真正的價值，在於讓 agent 面對的是更乾淨、可檢查的工作方式。
-
 ## CLI 指令
-
-CLI 的表面積刻意很小。大多數時候，你會一直在 `status`、`verify`、`sync`、`archive` 之間來回，而 `init` 與 `validate` 則負責建立結構和守住底線。
 
 - `init`：在專案裡建立 Crabyard 所需的基礎結構
 - `install`：`init` 的別名
+- `update`：更新既有 repo 的 managed assets 與 repo-local skills
 - `list`：列出專案裡目前有哪些變更
 - `show`：把單一變更包的內容印出來查看
 - `validate`：在繼續工作前檢查專案或變更結構是否正確
