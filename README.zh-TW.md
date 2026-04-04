@@ -68,6 +68,8 @@ CLI 升級後，如果要把既有 repo 的 managed templates 更新到最新版
 crabyard update /absolute/path/to/repo
 ```
 
+只有在你真的想把被取代的 managed files 複製到 `.crabyard/backups/` 時，才加上 `--backup`。
+
 第一次上手，大概會走這樣一輪：
 
 1. `crabyard init /absolute/path/to/repo`

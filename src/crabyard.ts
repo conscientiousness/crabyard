@@ -309,11 +309,13 @@ Init options:
   --primary-docs <comma-separated-paths>
   --tags <comma-separated-tags>
   --skip-repo
+  --backup
   --dry-run
 
 Update options:
   --primary-docs <comma-separated-paths>
   --tags <comma-separated-tags>
+  --backup
   --dry-run
 
 Common options:
@@ -361,14 +363,15 @@ async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: 
   io.stdout(`Tags: ${tags.join(", ")}`);
 
   if (!options.skipRepo) {
-    await installRepoAssets({
-      repoPath,
-      primaryDocs,
-      tags,
-      dryRun: options.dryRun,
-      timestamp,
-      io,
-    });
+      await installRepoAssets({
+        repoPath,
+        primaryDocs,
+        tags,
+        backup: options.backup,
+        dryRun: options.dryRun,
+        timestamp,
+        io,
+      });
   }
 
   io.stdout(mode === "init" ? "Init complete." : "Update complete.");
@@ -685,6 +688,7 @@ function parseInstallArgs(args: string[], cwd: string): InstallOptions {
   let tags: string[] = [];
   let skipRepo = false;
   let dryRun = false;
+  let backup = false;
   let repoPathSet = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -725,6 +729,9 @@ function parseInstallArgs(args: string[], cwd: string): InstallOptions {
       case "--dry-run":
         dryRun = true;
         break;
+      case "--backup":
+        backup = true;
+        break;
       default:
         throw new Error(`Unknown flag: ${value}`);
     }
@@ -736,6 +743,7 @@ function parseInstallArgs(args: string[], cwd: string): InstallOptions {
     tags,
     skipRepo,
     dryRun,
+    backup,
   };
 }
 
@@ -888,6 +896,7 @@ async function installRepoAssets(args: {
   repoPath: string;
   primaryDocs: string[];
   tags: string[];
+  backup: boolean;
   dryRun: boolean;
   timestamp: string;
   io: CliIO;
@@ -901,6 +910,7 @@ async function installRepoAssets(args: {
       sourcePath: join(REPO_ASSETS_ROOT, REPO_SKILLS_DIR, skillName),
       targetPath: join(args.repoPath, REPO_SKILLS_DIR, skillName),
       backupRoot,
+      backupEnabled: args.backup,
       baseRoot: args.repoPath,
       dryRun: args.dryRun,
       io: args.io,
@@ -911,6 +921,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, ROOT_DIRNAME, PROJECT_FILE),
     content: buildProjectFile(args.primaryDocs, args.tags),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -920,6 +931,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, ROOT_DIRNAME, MANIFEST_FILE),
     content: buildManifest(args.primaryDocs, args.tags),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -929,6 +941,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, ROOT_DIRNAME, TASK_FORMAT_FILE),
     content: await readFile(join(REPO_ASSETS_ROOT, ROOT_DIRNAME, TASK_FORMAT_FILE), "utf8"),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -941,6 +954,7 @@ async function installRepoAssets(args: {
       "Store accepted product behavior, contracts, and invariants here. Sync staged change specs into this tree with `crabyard sync <change>`.",
     ),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -950,6 +964,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, ROOT_DIRNAME, "changes", "README.md"),
     content: buildChangesReadme(),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -959,6 +974,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, ROOT_DIRNAME, KNOWLEDGE_INDEX_FILE),
     content: buildKnowledgeIndex(),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -968,6 +984,7 @@ async function installRepoAssets(args: {
     filePath: join(args.repoPath, INSTRUCTIONS_FILE),
     content: buildAgentsBlock(),
     backupRoot,
+    backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
     io: args.io,
@@ -1573,6 +1590,7 @@ async function updateAgentsFile(args: {
   filePath: string;
   content: string;
   backupRoot: string;
+  backupEnabled: boolean;
   baseRoot: string;
   dryRun: boolean;
   io: CliIO;
@@ -1601,7 +1619,7 @@ async function updateAgentsFile(args: {
     return;
   }
 
-  if ((await pathExists(args.filePath)) && existing !== nextContent) {
+  if (args.backupEnabled && (await pathExists(args.filePath)) && existing !== nextContent) {
     await backupExisting(args.filePath, args.backupRoot, args.baseRoot, false, args.io);
   }
 
@@ -1614,6 +1632,7 @@ async function writeManagedFile(args: {
   filePath: string;
   content: string;
   backupRoot: string;
+  backupEnabled: boolean;
   baseRoot: string;
   dryRun: boolean;
   io: CliIO;
@@ -1627,7 +1646,9 @@ async function writeManagedFile(args: {
       args.io.stdout(`unchanged ${args.filePath}`);
       return;
     }
-    await backupExisting(args.filePath, args.backupRoot, args.baseRoot, args.dryRun, args.io);
+    if (args.backupEnabled) {
+      await backupExisting(args.filePath, args.backupRoot, args.baseRoot, args.dryRun, args.io);
+    }
   }
 
   if (args.dryRun) {
@@ -1644,6 +1665,7 @@ async function copyManagedPath(args: {
   sourcePath: string;
   targetPath: string;
   backupRoot: string;
+  backupEnabled: boolean;
   baseRoot: string;
   dryRun: boolean;
   io: CliIO;
@@ -1653,7 +1675,9 @@ async function copyManagedPath(args: {
   }
 
   if (await pathExists(args.targetPath)) {
-    await backupExisting(args.targetPath, args.backupRoot, args.baseRoot, args.dryRun, args.io);
+    if (args.backupEnabled) {
+      await backupExisting(args.targetPath, args.backupRoot, args.baseRoot, args.dryRun, args.io);
+    }
     if (!args.dryRun) {
       await rm(args.targetPath, { recursive: true, force: true });
     }

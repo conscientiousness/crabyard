@@ -68,6 +68,8 @@ After upgrading the CLI, refresh the managed templates in an existing repo with:
 crabyard update /absolute/path/to/repo
 ```
 
+Add `--backup` only if you want managed files copied into `.crabyard/backups/` before replacement.
+
 A normal first loop looks like this:
 
 1. `crabyard init /absolute/path/to/repo`

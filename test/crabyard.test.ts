@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -403,6 +403,7 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
 
   const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
   assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
+  assert.equal(await pathExistsOnDisk(join(repoPath, ".crabyard", "backups")), false);
 
   const manifest = await readFile(join(repoPath, "crabyard", "manifest.yaml"), "utf8");
   assert.match(manifest, /source_docs:\n  - README\.md\n  - docs\/guide\.md\n/);
@@ -447,6 +448,25 @@ stale block
   assert.equal((agentsContent.match(/<!-- crabyard:memory:start -->/g) ?? []).length, 1);
   assert.equal((agentsContent.match(/<!-- crabyard:memory:end -->/g) ?? []).length, 1);
   assert.doesNotMatch(agentsContent, /stale block/);
+});
+
+test("update creates backups only when --backup is requested", async () => {
+  const repoPath = await createInitializedRepo();
+  const targetSkillPath = join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md");
+  await writeFile(targetSkillPath, "# stale template\n", "utf8");
+
+  const result = await run(repoPath, ["update", repoPath, "--backup"]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const backupsRoot = join(repoPath, ".crabyard", "backups");
+  assert.equal(await pathExistsOnDisk(backupsRoot), true);
+
+  const entries = await readdir(backupsRoot);
+  assert.equal(entries.length, 1);
+  assert.equal(
+    await pathExistsOnDisk(join(backupsRoot, entries[0], ".agents", "skills", "crabyard-apply", "SKILL.md")),
+    true,
+  );
 });
 
 test("manifest paths must stay inside the repo root", async () => {
@@ -787,5 +807,14 @@ async function assertPathMissing(targetPath: string) {
     if (error instanceof Error && /Expected path to be missing/.test(error.message)) {
       throw error;
     }
+  }
+}
+
+async function pathExistsOnDisk(targetPath: string) {
+  try {
+    await stat(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
