@@ -86,9 +86,16 @@ jobs:
             exit 1
           fi
 
+          if [[ "$VERSION" == *-* ]]; then
+            NPM_DIST_TAG="next"
+          else
+            NPM_DIST_TAG="latest"
+          fi
+
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "npm_dist_tag=$NPM_DIST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Validate release artifact
         run: pnpm run release:check
@@ -105,7 +112,7 @@ jobs:
 
       - name: Publish package to npm
         if: steps.npm-check.outputs.already_published != 'true'
-        run: npm publish --access public
+        run: npm publish --access public --tag "${{ steps.meta.outputs.npm_dist_tag }}"
 
       - name: Create GitHub release
         env:

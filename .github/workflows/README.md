@@ -24,6 +24,7 @@ Expected flow:
 
 For multiple releases on the same day, increment the suffix (`-1`, `-2`, `-3`) in both
 `package.json` and `src/shared.ts`, then tag with the same suffixed form.
+Suffixed releases publish to npm under the `next` dist-tag. Unsuffixed releases publish under `latest`.
 
 Before the first real publish, configure npm trusted publishing for this repository on npmjs.com.
 
