@@ -70,6 +70,14 @@ crabyard update /absolute/path/to/repo
 
 Add `--backup` only if you want managed files copied into `.crabyard/backups/` before replacement.
 
+If the repo already uses OpenSpec, migrate the existing specs and change bundles with:
+
+```bash
+crabyard migrate openspec /absolute/path/to/repo
+```
+
+This keeps the original `openspec/` tree in place, copies supported artifacts into `crabyard/`, and generates placeholder `execution.yaml` files for migrated change bundles.
+
 A normal first loop looks like this:
 
 1. `crabyard init /absolute/path/to/repo`
@@ -275,6 +283,7 @@ Agent:
 - `init`: set up Crabyard files in a repo
 - `install`: alias for `init`
 - `update`: refresh managed repo assets and repo-local skills in an existing repo
+- `migrate`: copy OpenSpec specs and change bundles into Crabyard
 - `list`: show available changes in the repo
 - `show`: print one change bundle for inspection
 - `validate`: check repo or change structure before work continues

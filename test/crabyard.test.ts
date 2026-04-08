@@ -354,6 +354,107 @@ units:
   assert.match(result.stderr, /must define exactly one of run or argv/i);
 });
 
+test("migrate openspec copies specs, change bundles, and archive history", async () => {
+  const repoPath = await mkdtemp(join(tmpdir(), "crabyard-openspec-migrate-"));
+
+  await mkdir(join(repoPath, "openspec"), { recursive: true });
+  await writeFile(join(repoPath, "openspec", "config.yaml"), "schema: spec-driven\n", "utf8");
+  await writeOpenSpecSpec(repoPath, "cli-archive/spec.md", "# CLI Archive\n");
+  await mkdir(join(repoPath, "openspec", "changes"), { recursive: true });
+  await writeFile(join(repoPath, "openspec", "changes", "IMPLEMENTATION_ORDER.md"), "# Order\n", "utf8");
+  await writeOpenSpecChange(repoPath, "ship-auth", {
+    proposal: "# Proposal\n",
+    tasks: `# Implementation Tasks
+
+## 1. Build Auth Module
+- [ ] Create \`src/auth.ts\`
+
+## 2. Wire CLI
+- [ ] Update \`src/index.ts\`
+`,
+    stagedSpecs: {
+      "auth/spec.md": "# Auth Spec\n",
+    },
+    extraFiles: {
+      "notes.md": "# Notes\n",
+    },
+  });
+  await writeOpenSpecChange(repoPath, "2026-01-01-old-feature", {
+    archived: true,
+    proposal: "# Archived Proposal\n",
+  });
+
+  const result = await run(repoPath, ["migrate", "openspec", repoPath]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Imported 1 spec file\(s\), 1 active change\(s\), and 1 archived change\(s\)\./);
+  assert.match(result.stdout, /Left in place for manual review:/);
+  assert.match(result.stdout, /openspec\/config\.yaml/);
+
+  await assertPathExists(join(repoPath, "crabyard", "manifest.yaml"));
+  assert.equal(await readFile(join(repoPath, "crabyard", "specs", "cli-archive", "spec.md"), "utf8"), "# CLI Archive\n");
+  assert.equal(await readFile(join(repoPath, "crabyard", "changes", "IMPLEMENTATION_ORDER.md"), "utf8"), "# Order\n");
+  assert.equal(await readFile(join(repoPath, "crabyard", "changes", "ship-auth", "proposal.md"), "utf8"), "# Proposal\n");
+  assert.match(
+    await readFile(join(repoPath, "crabyard", "changes", "ship-auth", "design.md"), "utf8"),
+    /did not include `design\.md`/i,
+  );
+  assert.equal(await readFile(join(repoPath, "crabyard", "changes", "ship-auth", "notes.md"), "utf8"), "# Notes\n");
+  assert.equal(
+    await readFile(join(repoPath, "crabyard", "changes", "ship-auth", "specs", "auth", "spec.md"), "utf8"),
+    "# Auth Spec\n",
+  );
+
+  const execution = await readFile(join(repoPath, "crabyard", "changes", "ship-auth", "execution.yaml"), "utf8");
+  assert.match(execution, /src\/auth\.ts/);
+  assert.match(execution, /src\/index\.ts/);
+
+  await assertPathExists(join(repoPath, "crabyard", "changes", "archive", "2026-01-01-old-feature", "tasks.md"));
+  await assertPathExists(join(repoPath, "crabyard", "changes", "archive", "2026-01-01-old-feature", "execution.yaml"));
+  await assertPathExists(join(repoPath, "openspec", "changes", "ship-auth", "proposal.md"));
+
+  const validateResult = await run(repoPath, ["validate", "--repo", repoPath]);
+  assert.equal(validateResult.code, 0, validateResult.stderr);
+});
+
+test("migrate openspec normalizes legacy task files and is idempotent", async () => {
+  const repoPath = await mkdtemp(join(tmpdir(), "crabyard-openspec-normalize-"));
+  await writeOpenSpecChange(repoPath, "legacy-tasks", {
+    proposal: "# Proposal\n",
+    tasks: `# Legacy Tasks
+- [ ] Review \`README.md\`
+`,
+  });
+
+  const firstRun = await run(repoPath, ["migrate", "openspec", repoPath]);
+  assert.equal(firstRun.code, 0, firstRun.stderr);
+
+  const secondRun = await run(repoPath, ["migrate", "openspec", repoPath]);
+  assert.equal(secondRun.code, 0, secondRun.stderr);
+
+  assert.equal(
+    await readFile(join(repoPath, "crabyard", "changes", "legacy-tasks", "tasks.openspec.md"), "utf8"),
+    "# Legacy Tasks\n- [ ] Review `README.md`\n",
+  );
+  assert.match(
+    await readFile(join(repoPath, "crabyard", "changes", "legacy-tasks", "tasks.md"), "utf8"),
+    /Normalize Migrated OpenSpec Tasks/,
+  );
+
+  const execution = await readFile(join(repoPath, "crabyard", "changes", "legacy-tasks", "execution.yaml"), "utf8");
+  assert.match(execution, /tasks\.openspec\.md/);
+
+  const validateResult = await run(repoPath, ["validate", "change", "legacy-tasks", "--repo", repoPath]);
+  assert.equal(validateResult.code, 0, validateResult.stderr);
+});
+
+test("migrate openspec requires an openspec directory", async () => {
+  const repoPath = await mkdtemp(join(tmpdir(), "crabyard-openspec-missing-"));
+  const result = await run(repoPath, ["migrate", "openspec", repoPath]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Missing OpenSpec root/i);
+});
+
 test("init creates the expected structure", async () => {
   const repoPath = await mkdtemp(join(tmpdir(), "crabyard-init-"));
   const result = await run(repoPath, ["init", repoPath]);
@@ -761,6 +862,55 @@ async function writeChange(
 
   for (const [relativePath, content] of Object.entries(args.stagedSpecs ?? {})) {
     const targetPath = join(specsDir, relativePath);
+    await mkdir(join(targetPath, ".."), { recursive: true });
+    await writeFile(targetPath, content, "utf8");
+  }
+}
+
+async function writeOpenSpecSpec(repoPath: string, relativePath: string, content: string) {
+  const targetPath = join(repoPath, "openspec", "specs", relativePath);
+  await mkdir(join(targetPath, ".."), { recursive: true });
+  await writeFile(targetPath, content, "utf8");
+}
+
+async function writeOpenSpecChange(
+  repoPath: string,
+  changeName: string,
+  args: {
+    archived?: boolean;
+    proposal?: string;
+    design?: string;
+    tasks?: string;
+    stagedSpecs?: Record<string, string>;
+    extraFiles?: Record<string, string>;
+  },
+) {
+  const changeDir = args.archived
+    ? join(repoPath, "openspec", "changes", "archive", changeName)
+    : join(repoPath, "openspec", "changes", changeName);
+  const specsDir = join(changeDir, "specs");
+  await mkdir(changeDir, { recursive: true });
+
+  if (args.proposal) {
+    await writeFile(join(changeDir, "proposal.md"), args.proposal, "utf8");
+  }
+
+  if (args.design) {
+    await writeFile(join(changeDir, "design.md"), args.design, "utf8");
+  }
+
+  if (args.tasks) {
+    await writeFile(join(changeDir, "tasks.md"), args.tasks, "utf8");
+  }
+
+  for (const [relativePath, content] of Object.entries(args.stagedSpecs ?? {})) {
+    const targetPath = join(specsDir, relativePath);
+    await mkdir(join(targetPath, ".."), { recursive: true });
+    await writeFile(targetPath, content, "utf8");
+  }
+
+  for (const [relativePath, content] of Object.entries(args.extraFiles ?? {})) {
+    const targetPath = join(changeDir, relativePath);
     await mkdir(join(targetPath, ".."), { recursive: true });
     await writeFile(targetPath, content, "utf8");
   }

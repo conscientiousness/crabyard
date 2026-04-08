@@ -2,7 +2,7 @@ import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseDocument } from "yaml";
+import { parseDocument, stringify } from "yaml";
 import { z } from "zod";
 
 import {
@@ -108,6 +108,20 @@ type CommonCommandOptions = {
   repoPath: string;
   json: boolean;
   args: string[];
+};
+
+type MigrateOptions = {
+  source: string;
+  repoPath: string;
+  backup: boolean;
+  dryRun: boolean;
+};
+
+type OpenSpecMigrationReport = {
+  activeChanges: number;
+  archivedChanges: number;
+  importedSpecs: number;
+  preservedRootPaths: string[];
 };
 
 type ChangeUnitStatus = {
@@ -243,6 +257,9 @@ async function dispatch(argv: string[], io: CliIO) {
     case "update":
       await runUpdate(rest, io);
       return;
+    case "migrate":
+      await runMigrate(rest, io);
+      return;
     case "list":
       await runList(rest, io);
       return;
@@ -280,6 +297,7 @@ Commands:
   init [repo-path] [options]               Bootstrap Crabyard into a repo
   install [repo-path] [options]            Alias for init
   update [repo-path] [options]             Refresh managed Crabyard repo assets
+  migrate openspec [repo-path] [options]   Copy OpenSpec artifacts into Crabyard
   list [all|specs|changes|knowledge]       List tracked repo artifacts
   show <target> [name]                     Show manifest, project, spec, change, or knowledge
   validate [repo]                          Validate the repo structure and active changes
@@ -300,6 +318,7 @@ Targets for show:
 Examples:
   pnpm exec tsx src/index.ts init /absolute/path/to/repo
   pnpm exec tsx src/index.ts update /absolute/path/to/repo
+  pnpm exec tsx src/index.ts migrate openspec /absolute/path/to/repo
   node dist/index.js list specs --repo /absolute/path/to/repo
   node dist/index.js verify add-auth --repo /absolute/path/to/repo
   node dist/index.js sync add-auth --repo /absolute/path/to/repo
@@ -318,6 +337,10 @@ Update options:
   --backup
   --dry-run
 
+Migrate options:
+  --backup
+  --dry-run
+
 Common options:
   --repo <path>
   --json
@@ -332,6 +355,65 @@ async function runInit(args: string[], io: CliIO) {
 
 async function runUpdate(args: string[], io: CliIO) {
   await runRepoAssetCommand("update", args, io);
+}
+
+async function runMigrate(args: string[], io: CliIO) {
+  const options = parseMigrateArgs(args, io.cwd);
+
+  if (options.source !== "openspec") {
+    throw new Error(
+      "Usage: crabyard migrate openspec [repo-path] [--repo <path>] [--backup] [--dry-run]",
+    );
+  }
+
+  const repoPath = resolve(options.repoPath);
+  const openSpecRootPath = join(repoPath, "openspec");
+
+  if (!(await isDirectory(openSpecRootPath))) {
+    throw new Error(`Missing OpenSpec root at ${openSpecRootPath}`);
+  }
+
+  const repoName = basename(repoPath);
+  const existingMetadata = await readRepoInstallMetadata(repoPath);
+  const primaryDocs =
+    (existingMetadata?.primaryDocs.length ?? 0) > 0 ? existingMetadata!.primaryDocs : await detectPrimaryDocs(repoPath);
+  const tags =
+    (existingMetadata?.tags.length ?? 0) > 0 ? existingMetadata!.tags : [toKebabCase(repoName)];
+  const timestamp = createTimestamp();
+
+  io.stdout("Migrating OpenSpec -> Crabyard");
+  io.stdout(`Repo: ${repoPath}`);
+
+  await installRepoAssets({
+    repoPath,
+    primaryDocs,
+    tags,
+    backup: options.backup,
+    dryRun: options.dryRun,
+    timestamp,
+    io,
+  });
+
+  const report = await migrateOpenSpecRepo({
+    repoPath,
+    openSpecRootPath,
+    dryRun: options.dryRun,
+    io,
+  });
+
+  io.stdout(
+    `Imported ${report.importedSpecs} spec file(s), ${report.activeChanges} active change(s), and ${report.archivedChanges} archived change(s).`,
+  );
+
+  if (report.preservedRootPaths.length > 0) {
+    io.stdout("Left in place for manual review:");
+    for (const relativePath of report.preservedRootPaths) {
+      io.stdout(`- ${relativePath}`);
+    }
+  }
+
+  io.stdout("Review generated execution.yaml files before relying on the migrated execution frontier.");
+  io.stdout("Migration complete.");
 }
 
 async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: CliIO) {
@@ -747,6 +829,55 @@ function parseInstallArgs(args: string[], cwd: string): InstallOptions {
   };
 }
 
+function parseMigrateArgs(args: string[], cwd: string): MigrateOptions {
+  let source = "";
+  let repoPath = cwd;
+  let backup = false;
+  let dryRun = false;
+  let repoPathSet = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+
+    if (!value.startsWith("--") && !source) {
+      source = value;
+      continue;
+    }
+
+    if (!value.startsWith("--") && !repoPathSet) {
+      repoPath = value;
+      repoPathSet = true;
+      continue;
+    }
+
+    switch (value) {
+      case "--repo": {
+        const next = args[index + 1];
+        if (!next) throw new Error("`--repo` requires a path.");
+        repoPath = next;
+        repoPathSet = true;
+        index += 1;
+        break;
+      }
+      case "--backup":
+        backup = true;
+        break;
+      case "--dry-run":
+        dryRun = true;
+        break;
+      default:
+        throw new Error(`Unknown flag: ${value}`);
+    }
+  }
+
+  return {
+    source,
+    repoPath,
+    backup,
+    dryRun,
+  };
+}
+
 function parseCommonFlags(args: string[], cwd: string): CommonCommandOptions {
   let repoPath = cwd;
   let json = false;
@@ -989,6 +1120,483 @@ async function installRepoAssets(args: {
     dryRun: args.dryRun,
     io: args.io,
   });
+}
+
+async function migrateOpenSpecRepo(args: {
+  repoPath: string;
+  openSpecRootPath: string;
+  dryRun: boolean;
+  io: CliIO;
+}): Promise<OpenSpecMigrationReport> {
+  const sourceSpecsRoot = join(args.openSpecRootPath, "specs");
+  const sourceChangesRoot = join(args.openSpecRootPath, "changes");
+  const targetSpecsRoot = join(args.repoPath, ROOT_DIRNAME, "specs");
+  const targetChangesRoot = join(args.repoPath, ROOT_DIRNAME, "changes");
+  const report: OpenSpecMigrationReport = {
+    activeChanges: 0,
+    archivedChanges: 0,
+    importedSpecs: 0,
+    preservedRootPaths: [],
+  };
+
+  if (await isDirectory(sourceSpecsRoot)) {
+    report.importedSpecs = await copySourceTree({
+      sourceRoot: sourceSpecsRoot,
+      targetRoot: targetSpecsRoot,
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  if (await isDirectory(sourceChangesRoot)) {
+    const entries = (await readdir(sourceChangesRoot, { withFileTypes: true })).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+
+    for (const entry of entries) {
+      const sourcePath = join(sourceChangesRoot, entry.name);
+
+      if (entry.isDirectory() && entry.name === "archive") {
+        report.archivedChanges = await migrateOpenSpecArchivedChanges({
+          sourceArchiveRoot: sourcePath,
+          targetArchiveRoot: join(targetChangesRoot, "archive"),
+          dryRun: args.dryRun,
+          io: args.io,
+        });
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        await migrateOpenSpecChangeDirectory({
+          sourceChangeDir: sourcePath,
+          targetChangeDir: join(targetChangesRoot, entry.name),
+          changeRelativePath: `${ROOT_DIRNAME}/changes/${entry.name}`,
+          dryRun: args.dryRun,
+          io: args.io,
+        });
+        report.activeChanges += 1;
+        continue;
+      }
+
+      if (entry.isFile()) {
+        await copyMigrationFile({
+          sourcePath,
+          targetPath: join(targetChangesRoot, entry.name),
+          dryRun: args.dryRun,
+          io: args.io,
+        });
+      }
+    }
+  }
+
+  for (const relativePath of ["openspec/config.yaml", "openspec/explorations", "openspec/project.md"]) {
+    if (await pathExists(join(args.repoPath, relativePath))) {
+      report.preservedRootPaths.push(relativePath);
+    }
+  }
+
+  return report;
+}
+
+async function migrateOpenSpecArchivedChanges(args: {
+  sourceArchiveRoot: string;
+  targetArchiveRoot: string;
+  dryRun: boolean;
+  io: CliIO;
+}): Promise<number> {
+  if (!(await isDirectory(args.sourceArchiveRoot))) {
+    return 0;
+  }
+
+  let archivedChanges = 0;
+  const entries = (await readdir(args.sourceArchiveRoot, { withFileTypes: true })).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+
+  for (const entry of entries) {
+    const sourcePath = join(args.sourceArchiveRoot, entry.name);
+
+    if (entry.isDirectory()) {
+      await migrateOpenSpecChangeDirectory({
+        sourceChangeDir: sourcePath,
+        targetChangeDir: join(args.targetArchiveRoot, entry.name),
+        changeRelativePath: `${ROOT_DIRNAME}/changes/archive/${entry.name}`,
+        dryRun: args.dryRun,
+        io: args.io,
+      });
+      archivedChanges += 1;
+      continue;
+    }
+
+    if (entry.isFile()) {
+      await copyMigrationFile({
+        sourcePath,
+        targetPath: join(args.targetArchiveRoot, entry.name),
+        dryRun: args.dryRun,
+        io: args.io,
+      });
+    }
+  }
+
+  return archivedChanges;
+}
+
+async function migrateOpenSpecChangeDirectory(args: {
+  sourceChangeDir: string;
+  targetChangeDir: string;
+  changeRelativePath: string;
+  dryRun: boolean;
+  io: CliIO;
+}) {
+  await ensureMigrationDirectory(args.targetChangeDir, args.dryRun);
+
+  const sourceFiles = await walkFiles(args.sourceChangeDir);
+  for (const sourcePath of sourceFiles) {
+    const relativePath = relative(args.sourceChangeDir, sourcePath).replace(/\\/g, "/");
+
+    if (
+      relativePath === "proposal.md" ||
+      relativePath === "design.md" ||
+      relativePath === "tasks.md" ||
+      relativePath === "execution.yaml" ||
+      relativePath.startsWith("specs/")
+    ) {
+      continue;
+    }
+
+    await copyMigrationFile({
+      sourcePath,
+      targetPath: join(args.targetChangeDir, relativePath),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  const sourceProposalPath = join(args.sourceChangeDir, "proposal.md");
+  if (await pathExists(sourceProposalPath)) {
+    await copyMigrationFile({
+      sourcePath: sourceProposalPath,
+      targetPath: join(args.targetChangeDir, "proposal.md"),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  } else {
+    await writeMigrationFile({
+      targetPath: join(args.targetChangeDir, "proposal.md"),
+      content: buildMigrationPlaceholder("Proposal", [
+        "The original OpenSpec change did not include `proposal.md`.",
+        "Review the staged specs and task list, then replace this placeholder with intent, scope, and acceptance target.",
+      ]),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  const sourceDesignPath = join(args.sourceChangeDir, "design.md");
+  if (await pathExists(sourceDesignPath)) {
+    await copyMigrationFile({
+      sourcePath: sourceDesignPath,
+      targetPath: join(args.targetChangeDir, "design.md"),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  } else {
+    await writeMigrationFile({
+      targetPath: join(args.targetChangeDir, "design.md"),
+      content: buildMigrationPlaceholder("Design", [
+        "The original OpenSpec change did not include `design.md`.",
+        "Review `proposal.md`, `tasks.md`, and the staged specs, then replace this placeholder with implementation shape and tradeoffs.",
+      ]),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  const tasksContent = await migrateOpenSpecTasks({
+    sourceChangeDir: args.sourceChangeDir,
+    targetChangeDir: args.targetChangeDir,
+    changeRelativePath: args.changeRelativePath,
+    dryRun: args.dryRun,
+    io: args.io,
+  });
+
+  const sourceSpecsRoot = join(args.sourceChangeDir, "specs");
+  const targetSpecsRoot = join(args.targetChangeDir, "specs");
+  await ensureMigrationDirectory(targetSpecsRoot, args.dryRun);
+  if (await isDirectory(sourceSpecsRoot)) {
+    await copySourceTree({
+      sourceRoot: sourceSpecsRoot,
+      targetRoot: targetSpecsRoot,
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  await writeMigrationFile({
+    targetPath: join(args.targetChangeDir, "execution.yaml"),
+    content: buildMigratedExecutionYaml(tasksContent, args.changeRelativePath),
+    dryRun: args.dryRun,
+    io: args.io,
+  });
+}
+
+async function migrateOpenSpecTasks(args: {
+  sourceChangeDir: string;
+  targetChangeDir: string;
+  changeRelativePath: string;
+  dryRun: boolean;
+  io: CliIO;
+}): Promise<string> {
+  const sourceTasksPath = join(args.sourceChangeDir, "tasks.md");
+  const targetTasksPath = join(args.targetChangeDir, "tasks.md");
+
+  if (!(await pathExists(sourceTasksPath))) {
+    const placeholder = buildMissingMigrationTasks();
+    await writeMigrationFile({
+      targetPath: targetTasksPath,
+      content: placeholder,
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+    return placeholder;
+  }
+
+  const sourceContent = await readFile(sourceTasksPath, "utf8");
+  if (extractTaskHeadings(sourceContent).length > 0) {
+    await copyMigrationFile({
+      sourcePath: sourceTasksPath,
+      targetPath: targetTasksPath,
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+    return sourceContent;
+  }
+
+  await copyMigrationFile({
+    sourcePath: sourceTasksPath,
+    targetPath: join(args.targetChangeDir, "tasks.openspec.md"),
+    dryRun: args.dryRun,
+    io: args.io,
+  });
+
+  const normalizedTasks = buildNormalizedMigrationTasks(args.changeRelativePath);
+  await writeMigrationFile({
+    targetPath: targetTasksPath,
+    content: normalizedTasks,
+    dryRun: args.dryRun,
+    io: args.io,
+  });
+  return normalizedTasks;
+}
+
+async function copySourceTree(args: {
+  sourceRoot: string;
+  targetRoot: string;
+  dryRun: boolean;
+  io: CliIO;
+}): Promise<number> {
+  const sourceFiles = await walkFiles(args.sourceRoot);
+
+  for (const sourcePath of sourceFiles) {
+    const relativePath = relative(args.sourceRoot, sourcePath);
+    await copyMigrationFile({
+      sourcePath,
+      targetPath: join(args.targetRoot, relativePath),
+      dryRun: args.dryRun,
+      io: args.io,
+    });
+  }
+
+  return sourceFiles.length;
+}
+
+async function ensureMigrationDirectory(targetPath: string, dryRun: boolean) {
+  if (await pathExists(targetPath)) {
+    if (!(await isDirectory(targetPath))) {
+      throw new Error(`Expected directory but found file: ${targetPath}`);
+    }
+    return;
+  }
+
+  if (dryRun) {
+    return;
+  }
+
+  await mkdir(targetPath, { recursive: true });
+}
+
+async function copyMigrationFile(args: {
+  sourcePath: string;
+  targetPath: string;
+  dryRun: boolean;
+  io: CliIO;
+}) {
+  await writeMigrationTarget({
+    targetPath: args.targetPath,
+    content: await readFile(args.sourcePath),
+    dryRun: args.dryRun,
+    io: args.io,
+    dryRunVerb: "copy",
+    successVerb: "copied",
+  });
+}
+
+async function writeMigrationFile(args: {
+  targetPath: string;
+  content: string;
+  dryRun: boolean;
+  io: CliIO;
+}) {
+  await writeMigrationTarget({
+    targetPath: args.targetPath,
+    content: args.content,
+    dryRun: args.dryRun,
+    io: args.io,
+    dryRunVerb: "write",
+    successVerb: "wrote",
+  });
+}
+
+async function writeMigrationTarget(args: {
+  targetPath: string;
+  content: string | Buffer;
+  dryRun: boolean;
+  io: CliIO;
+  dryRunVerb: "copy" | "write";
+  successVerb: "copied" | "wrote";
+}) {
+  const nextContent = typeof args.content === "string" ? Buffer.from(args.content, "utf8") : args.content;
+
+  if (await pathExists(args.targetPath)) {
+    const targetStats = await stat(args.targetPath);
+    if (!targetStats.isFile()) {
+      throw new Error(`Expected file but found directory: ${args.targetPath}`);
+    }
+
+    const existing = await readFile(args.targetPath);
+    if (Buffer.compare(existing, nextContent) === 0) {
+      args.io.stdout(`unchanged ${args.targetPath}`);
+      return;
+    }
+
+    throw new Error(`Refusing to overwrite existing file with different content: ${args.targetPath}`);
+  }
+
+  if (args.dryRun) {
+    args.io.stdout(`[dry-run] ${args.dryRunVerb} ${args.targetPath}`);
+    return;
+  }
+
+  await mkdir(dirname(args.targetPath), { recursive: true });
+  await writeFile(args.targetPath, nextContent);
+  args.io.stdout(`${args.successVerb} ${args.targetPath}`);
+}
+
+function buildMigrationPlaceholder(title: string, lines: string[]): string {
+  return `# ${title}
+
+Migrated from OpenSpec.
+
+${lines.join("\n")}
+`;
+}
+
+function buildMissingMigrationTasks(): string {
+  return `# Implementation Tasks
+
+## 1. Rebuild Migrated Plan
+- [ ] Review \`proposal.md\`, \`design.md\`, and staged specs
+- [ ] Rewrite this file into concrete Crabyard execution sections
+`;
+}
+
+function buildNormalizedMigrationTasks(changeRelativePath: string): string {
+  return `# Implementation Tasks
+
+## 1. Normalize Migrated OpenSpec Tasks
+- [ ] Review the original OpenSpec checklist in \`${changeRelativePath}/tasks.openspec.md\`
+- [ ] Rewrite this file into top-level \`##\` execution sections for Crabyard
+`;
+}
+
+function buildMigratedExecutionYaml(tasksContent: string, changeRelativePath: string): string {
+  const sections = parseTaskSections(tasksContent);
+  const execution = {
+    version: 1 as const,
+    tasks_file: "tasks.md",
+    units: sections.map((section, index) => ({
+      id: `T${index + 1}`,
+      title: section.title,
+      parallel: false,
+      depends_on: index === 0 ? [] : [`T${index}`],
+      writes: inferMigratedWrites(section, changeRelativePath),
+      verify: [
+        {
+          kind: "artifact" as const,
+          path: `${changeRelativePath}/tasks.md`,
+          state: "exists" as const,
+          notes: "Replace this placeholder verify check after migration.",
+        },
+      ],
+      notes: "Migrated from OpenSpec. Review inferred writes and placeholder verify metadata before relying on this execution graph.",
+    })),
+  };
+
+  return stringify(execution).trimEnd() + "\n";
+}
+
+function inferMigratedWrites(section: TaskSection, changeRelativePath: string): string[] {
+  const writes = new Set<string>();
+
+  for (const line of section.lines) {
+    for (const match of line.matchAll(/`([^`\n]+)`/g)) {
+      const candidate = normalizeMigratedWriteCandidate(match[1] ?? "", changeRelativePath);
+      if (candidate) {
+        writes.add(candidate);
+      }
+    }
+  }
+
+  if (writes.size === 0) {
+    writes.add(`${changeRelativePath}/`);
+  }
+
+  return [...writes].sort();
+}
+
+function normalizeMigratedWriteCandidate(value: string, changeRelativePath: string): string | null {
+  const trimmed = value.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+
+  if (!trimmed || /\s/.test(trimmed) || trimmed.startsWith("-")) {
+    return null;
+  }
+
+  const mappedRoot =
+    trimmed.startsWith("openspec/") ? `${ROOT_DIRNAME}/${trimmed.slice("openspec/".length)}` : trimmed;
+
+  if (
+    mappedRoot === "proposal.md" ||
+    mappedRoot === "design.md" ||
+    mappedRoot === "tasks.md" ||
+    mappedRoot === "execution.yaml" ||
+    mappedRoot === "review.md"
+  ) {
+    return `${changeRelativePath}/${mappedRoot}`;
+  }
+
+  if (mappedRoot.startsWith("specs/")) {
+    return `${changeRelativePath}/${mappedRoot}`;
+  }
+
+  if (mappedRoot.startsWith("/") || mappedRoot.startsWith("../")) {
+    return null;
+  }
+
+  if (!mappedRoot.includes("/") && !/\.[A-Za-z0-9]+$/.test(mappedRoot)) {
+    return null;
+  }
+
+  return mappedRoot;
 }
 
 async function listSpecEntries(context: RepoContext): Promise<string[]> {

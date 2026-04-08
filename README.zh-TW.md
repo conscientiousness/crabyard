@@ -70,6 +70,14 @@ crabyard update /absolute/path/to/repo
 
 只有在你真的想把被取代的 managed files 複製到 `.crabyard/backups/` 時，才加上 `--backup`。
 
+如果 repo 原本已經在使用 OpenSpec，可以直接把既有 spec 與 change bundle 遷移進 Crabyard：
+
+```bash
+crabyard migrate openspec /absolute/path/to/repo
+```
+
+這個指令會保留原本的 `openspec/` 目錄，並把支援的內容複製到 `crabyard/`，同時替遷移過來的 change bundle 產生可用的 `execution.yaml` 佔位檔。
+
 第一次上手，大概會走這樣一輪：
 
 1. `crabyard init /absolute/path/to/repo`
@@ -275,6 +283,7 @@ Agent:
 - `init`：在專案裡建立 Crabyard 所需的基礎結構
 - `install`：`init` 的別名
 - `update`：更新既有 repo 的 managed assets 與 repo-local skills
+- `migrate`：把 OpenSpec 的 spec 與 change bundle 複製進 Crabyard
 - `list`：列出專案裡目前有哪些變更
 - `show`：把單一變更包的內容印出來查看
 - `validate`：在繼續工作前檢查專案或變更結構是否正確
