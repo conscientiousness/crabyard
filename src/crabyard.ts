@@ -33,6 +33,8 @@ import {
   defaultCliIO,
   escapeForRegex,
   findDuplicates,
+  formatCliLabelValue,
+  formatCliText,
   formatValidationErrors,
   formatYamlList,
   listMarkdownFiles,
@@ -433,7 +435,7 @@ Usage:
 Commands:
   init [repo-path] [options]               Bootstrap Crabyard into a repo
   install [repo-path] [options]            Alias for init
-  update [repo-path] [options]             Refresh managed Crabyard repo assets
+  update [repo-path] [options]             Refresh replace-safe Crabyard assets
   migrate openspec [repo-path] [options]   Copy OpenSpec artifacts into Crabyard
   list [all|specs|changes|knowledge]       List tracked repo artifacts
   show <target> [name]                     Show manifest, project, spec, change, or knowledge
@@ -524,8 +526,8 @@ async function runMigrate(args: string[], io: CliIO) {
     (existingMetadata?.tags.length ?? 0) > 0 ? existingMetadata!.tags : [toKebabCase(repoName)];
   const timestamp = createTimestamp();
 
-  io.stdout("Migrating OpenSpec -> Crabyard");
-  io.stdout(`Repo: ${repoPath}`);
+  io.stdout(formatCliText("Migrating OpenSpec -> Crabyard", "heading"));
+  io.stdout(formatCliLabelValue("Repo", repoPath));
 
   await installRepoAssets({
     repoPath,
@@ -534,6 +536,7 @@ async function runMigrate(args: string[], io: CliIO) {
     backup: options.backup,
     dryRun: options.dryRun,
     timestamp,
+    mode: "init",
     io,
   });
 
@@ -545,18 +548,21 @@ async function runMigrate(args: string[], io: CliIO) {
   });
 
   io.stdout(
-    `Imported ${report.importedSpecs} spec file(s), ${report.activeChanges} active change(s), and ${report.archivedChanges} archived change(s).`,
+    formatCliText(
+      `Imported ${report.importedSpecs} spec file(s), ${report.activeChanges} active change(s), and ${report.archivedChanges} archived change(s).`,
+      "success",
+    ),
   );
 
   if (report.preservedRootPaths.length > 0) {
-    io.stdout("Left in place for manual review:");
+    io.stdout(formatCliText("Left in place for manual review:", "warning"));
     for (const relativePath of report.preservedRootPaths) {
       io.stdout(`- ${relativePath}`);
     }
   }
 
-  io.stdout("Review generated execution.yaml files before relying on the migrated execution frontier.");
-  io.stdout("Migration complete.");
+  io.stdout(formatCliText("Review generated execution.yaml files before relying on the migrated execution frontier.", "warning"));
+  io.stdout(formatCliText("Migration complete.", "success"));
 }
 
 async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: CliIO) {
@@ -582,24 +588,25 @@ async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: 
         : [toKebabCase(repoName)];
   const timestamp = createTimestamp();
 
-  io.stdout(mode === "init" ? `Initializing ${PRODUCT_NAME}` : `Updating ${PRODUCT_NAME}`);
-  io.stdout(`Repo: ${repoPath}`);
-  io.stdout(`Source docs: ${primaryDocs.join(", ")}`);
-  io.stdout(`Tags: ${tags.join(", ")}`);
+  io.stdout(formatCliText(mode === "init" ? `Initializing ${PRODUCT_NAME}` : `Updating ${PRODUCT_NAME}`, "heading"));
+  io.stdout(formatCliLabelValue("Repo", repoPath));
+  io.stdout(formatCliLabelValue("Source docs", primaryDocs.join(", ")));
+  io.stdout(formatCliLabelValue("Tags", tags.join(", ")));
 
   if (!options.skipRepo) {
-      await installRepoAssets({
-        repoPath,
-        primaryDocs,
-        tags,
-        backup: options.backup,
-        dryRun: options.dryRun,
-        timestamp,
-        io,
-      });
+    await installRepoAssets({
+      repoPath,
+      primaryDocs,
+      tags,
+      backup: options.backup,
+      dryRun: options.dryRun,
+      timestamp,
+      mode,
+      io,
+    });
   }
 
-  io.stdout(mode === "init" ? "Init complete." : "Update complete.");
+  io.stdout(formatCliText(mode === "init" ? "Init complete." : "Update complete.", "success"));
 }
 
 async function runList(args: string[], io: CliIO) {
@@ -841,11 +848,15 @@ async function runVerify(args: string[], io: CliIO) {
     return;
   }
 
-  io.stdout(`Change ${report.change.name} verified.`);
+  io.stdout(formatCliText(`Change ${report.change.name} verified.`, "success"));
   if (report.sync.pendingCount > 0) {
-    io.stdout(`Sync required: ${report.sync.pendingCount} staged spec file(s) differ from accepted specs.`);
+    io.stdout(
+      formatCliLabelValue("Sync required", `${report.sync.pendingCount} staged spec file(s) differ from accepted specs.`, {
+        valueTone: "warning",
+      }),
+    );
   } else {
-    io.stdout("Sync state coherent.");
+    io.stdout(formatCliText("Sync state coherent.", "success"));
   }
 }
 
@@ -901,7 +912,7 @@ async function runSync(args: string[], io: CliIO) {
   const plan = verification.syncPlan;
 
   if (plan.pending.length === 0) {
-    io.stdout(`Change ${basename(changeDir)} is already sync-coherent.`);
+    io.stdout(formatCliText(`Change ${basename(changeDir)} is already sync-coherent.`, "success"));
     return;
   }
 
@@ -911,7 +922,7 @@ async function runSync(args: string[], io: CliIO) {
     await writeFile(entry.targetPath, content);
   }
 
-  io.stdout(`Synced ${plan.pending.length} spec file(s) for ${basename(changeDir)}.`);
+  io.stdout(formatCliText(`Synced ${plan.pending.length} spec file(s) for ${basename(changeDir)}.`, "success"));
   for (const entry of plan.pending) {
     io.stdout(`- ${entry.action} ${relative(context.repoPath, entry.targetPath)}`);
   }
@@ -963,13 +974,18 @@ async function runArchive(args: string[], io: CliIO) {
   }
 
   if (dryRun) {
-    io.stdout(`[dry-run] archive ${relative(context.repoPath, verification.changeDir)} -> ${relative(context.repoPath, archiveDir)}`);
+    io.stdout(
+      formatCliText(
+        `[dry-run] archive ${relative(context.repoPath, verification.changeDir)} -> ${relative(context.repoPath, archiveDir)}`,
+        "warning",
+      ),
+    );
     return;
   }
 
   await mkdir(archiveRoot, { recursive: true });
   await rename(verification.changeDir, archiveDir);
-  io.stdout(`Archived ${basename(verification.changeDir)} -> ${archiveDir}`);
+  io.stdout(formatCliText(`Archived ${basename(verification.changeDir)} -> ${archiveDir}`, "success"));
 }
 
 function parseInstallArgs(args: string[], cwd: string): InstallOptions {
@@ -1035,6 +1051,19 @@ function parseInstallArgs(args: string[], cwd: string): InstallOptions {
     dryRun,
     backup,
   };
+}
+
+function getChangeStateTone(state: ChangeStatusReport["state"]) {
+  switch (state) {
+    case "ready-to-archive":
+      return "success" as const;
+    case "ready-to-sync":
+      return "warning" as const;
+    case "in-progress":
+      return "accent" as const;
+    case "invalid":
+      return "error" as const;
+  }
 }
 
 function parseMigrateArgs(args: string[], cwd: string): MigrateOptions {
@@ -1282,12 +1311,17 @@ async function installRepoAssets(args: {
   backup: boolean;
   dryRun: boolean;
   timestamp: string;
+  mode: "init" | "update";
   io: CliIO;
 }) {
   const backupRoot = join(args.repoPath, BACKUP_DIRNAME, "backups", args.timestamp);
   const context = await loadRepoContext(args.repoPath);
+  const routing = buildRoutingPaths(context);
+  const managedManifestData = buildManagedManifestData(context.rootDir, args.primaryDocs, args.tags);
+  const existingManifestConfig = await readExistingManifestConfig(context.manifestPath);
+  const workflow = existingManifestConfig?.workflow ?? managedManifestData.workflow;
 
-  args.io.stdout(`Installing repo assets -> ${args.repoPath}`);
+  args.io.stdout(formatCliText(`Installing repo assets -> ${args.repoPath}`, "heading"));
 
   for (const skillName of REPO_SKILL_NAMES) {
     await copyManagedPath({
@@ -1303,11 +1337,18 @@ async function installRepoAssets(args: {
 
   await writeManagedFile({
     filePath: context.projectFilePath,
-    content: buildProjectFile(args.primaryDocs, args.tags),
+    content: buildProjectFile(args.primaryDocs, args.tags, {
+      instructionsFile: routing.instructionsFile,
+      specsRoot: routing.specsRoot,
+      changeSpecsRoot: `${routing.changesRoot}/<slug>/specs`,
+      knowledgeRoot: routing.knowledgeRoot,
+      workflow,
+    }),
     backupRoot,
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
+    overwriteExisting: args.mode === "init",
     io: args.io,
   });
 
@@ -1329,6 +1370,7 @@ async function installRepoAssets(args: {
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
+    overwriteExisting: args.mode === "init",
     io: args.io,
   });
 
@@ -1342,6 +1384,7 @@ async function installRepoAssets(args: {
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
+    overwriteExisting: args.mode === "init",
     io: args.io,
   });
 
@@ -1352,6 +1395,7 @@ async function installRepoAssets(args: {
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
+    overwriteExisting: args.mode === "init",
     io: args.io,
   });
 
@@ -1362,12 +1406,22 @@ async function installRepoAssets(args: {
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
     dryRun: args.dryRun,
+    overwriteExisting: args.mode === "init",
     io: args.io,
   });
 
   await updateAgentsFile({
     filePath: context.instructionsPath,
-    content: buildAgentsBlock(),
+    content: buildAgentsBlock({
+      instructionsFile: routing.instructionsFile,
+      manifestFile: routing.manifestFile,
+      projectFile: routing.projectFile,
+      specsRoot: routing.specsRoot,
+      changesRoot: routing.changesRoot,
+      knowledgeRoot: routing.knowledgeRoot,
+      repoSkillsRoot: routing.repoSkillsRoot,
+      workflow,
+    }),
     backupRoot,
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
@@ -1913,7 +1967,7 @@ async function printArtifact(
     return;
   }
 
-  io.stdout(`=== ${relative(repoPath, filePath)} ===`);
+  io.stdout(formatCliText(`=== ${relative(repoPath, filePath)} ===`, "heading"));
   io.stdout(content.trimEnd());
 }
 
@@ -1944,7 +1998,7 @@ async function printChangeBundle(changeDir: string, repoPath: string, io: CliIO,
 
   for (const filePath of files) {
     const content = await readFile(filePath, "utf8");
-    io.stdout(`=== ${relative(repoPath, filePath)} ===`);
+    io.stdout(formatCliText(`=== ${relative(repoPath, filePath)} ===`, "heading"));
     io.stdout(content.trimEnd());
     io.stdout("");
   }
@@ -2330,54 +2384,78 @@ function buildUnitStatuses(execution: ParsedExecution | null, taskSections: Task
 }
 
 function printRepoStatus(report: RepoStatusReport, io: CliIO) {
-  io.stdout(`Repo: ${report.repoPath}`);
-  io.stdout(`Validation: ${report.validation.valid ? "valid" : "invalid"}`);
+  io.stdout(formatCliLabelValue("Repo", report.repoPath));
   io.stdout(
-    `Counts: ${report.counts.activeChanges} active change(s), ${report.counts.archivedChanges} archived, ${report.counts.specs} spec file(s), ${report.counts.knowledge} knowledge note(s)`,
+    formatCliLabelValue("Validation", report.validation.valid ? "valid" : "invalid", {
+      valueTone: report.validation.valid ? "success" : "error",
+    }),
+  );
+  io.stdout(
+    formatCliLabelValue(
+      "Counts",
+      `${report.counts.activeChanges} active change(s), ${report.counts.archivedChanges} archived, ${report.counts.specs} spec file(s), ${report.counts.knowledge} knowledge note(s)`,
+    ),
   );
 
   if (report.validation.errors.length > 0) {
-    io.stdout("Validation Errors:");
+    io.stdout(formatCliText("Validation Errors:", "warning"));
     for (const error of report.validation.errors) {
       io.stdout(`- ${error}`);
     }
   }
 
   if (report.activeChanges.length === 0) {
-    io.stdout("Active Changes: none");
+    io.stdout(formatCliLabelValue("Active Changes", "none", { valueTone: "muted" }));
     return;
   }
 
-  io.stdout("Active Changes:");
+  io.stdout(formatCliText("Active Changes:", "heading"));
   for (const change of report.activeChanges) {
-    io.stdout(`- ${change.name}: ${change.state}; ready units=${change.readyUnits}; pending sync=${change.pendingSync}`);
+    io.stdout(
+      `- ${change.name}: ${formatCliText(change.state, getChangeStateTone(change.state))}; ready units=${change.readyUnits}; pending sync=${change.pendingSync}`,
+    );
   }
 }
 
 function printChangeStatus(report: ChangeStatusReport, io: CliIO) {
-  io.stdout(`Change: ${report.change.name}`);
-  io.stdout(`Path: ${report.change.path}`);
-  io.stdout(`State: ${report.state}`);
+  io.stdout(formatCliLabelValue("Change", report.change.name));
+  io.stdout(formatCliLabelValue("Path", report.change.path));
+  io.stdout(formatCliLabelValue("State", report.state, { valueTone: getChangeStateTone(report.state) }));
   io.stdout(
-    `Tasks: ${report.tasks.completedSections}/${report.tasks.totalSections} sections complete; ${report.tasks.checkedCheckboxes}/${report.tasks.totalCheckboxes} checkbox items checked`,
+    formatCliLabelValue(
+      "Tasks",
+      `${report.tasks.completedSections}/${report.tasks.totalSections} sections complete; ${report.tasks.checkedCheckboxes}/${report.tasks.totalCheckboxes} checkbox items checked`,
+    ),
   );
   io.stdout(
-    `Units: ${report.units.complete}/${report.units.total} complete; ${report.units.ready} ready; ${report.units.blocked} blocked; ${report.units.pending} pending`,
+    formatCliLabelValue(
+      "Units",
+      `${report.units.complete}/${report.units.total} complete; ${report.units.ready} ready; ${report.units.blocked} blocked; ${report.units.pending} pending`,
+    ),
   );
   io.stdout(
-    `Verify: ${report.verification.summary.totalChecks} check(s); ready frontier has ${report.verification.summary.readyUnitChecks} check(s) across ${report.frontier.readyUnits.length} unit(s)`,
+    formatCliLabelValue(
+      "Verify",
+      `${report.verification.summary.totalChecks} check(s); ready frontier has ${report.verification.summary.readyUnitChecks} check(s) across ${report.frontier.readyUnits.length} unit(s)`,
+    ),
   );
-  io.stdout(report.sync.coherent ? "Sync: coherent" : `Sync: ${report.sync.pendingCount} staged spec file(s) pending`);
+  io.stdout(
+    formatCliLabelValue(
+      "Sync",
+      report.sync.coherent ? "coherent" : `${report.sync.pendingCount} staged spec file(s) pending`,
+      { valueTone: report.sync.coherent ? "success" : "warning" },
+    ),
+  );
 
   if (!report.validation.valid) {
-    io.stdout("Validation Errors:");
+    io.stdout(formatCliText("Validation Errors:", "warning"));
     for (const error of report.validation.errors) {
       io.stdout(`- ${error}`);
     }
   }
 
   if (report.frontier.readyUnits.length > 0) {
-    io.stdout("Ready Units:");
+    io.stdout(formatCliText("Ready Units:", "heading"));
     for (const unit of report.frontier.readyUnits) {
       io.stdout(`- ${unit.id} ${unit.title}`);
       for (const check of unit.verify) {
@@ -2387,14 +2465,14 @@ function printChangeStatus(report: ChangeStatusReport, io: CliIO) {
   }
 
   if (report.frontier.blockedUnits.length > 0) {
-    io.stdout("Blocked Units:");
+    io.stdout(formatCliText("Blocked Units:", "warning"));
     for (const unit of report.frontier.blockedUnits) {
       io.stdout(`- ${unit.id} ${unit.title} <- ${unit.blockedBy.join(", ")}`);
     }
   }
 
   if (!report.verification.ready) {
-    io.stdout("Verification Gaps:");
+    io.stdout(formatCliText("Verification Gaps:", "warning"));
     for (const error of report.verification.errors) {
       io.stdout(`- ${error}`);
     }
@@ -2402,33 +2480,41 @@ function printChangeStatus(report: ChangeStatusReport, io: CliIO) {
 }
 
 function printCheckReport(report: CheckReport, io: CliIO) {
-  io.stdout(`Check: ${report.change}`);
-  io.stdout(`Checks: ${report.summary.passed}/${report.summary.checks} passed across ${report.summary.units} unit(s)`);
+  io.stdout(formatCliLabelValue("Check", report.change));
+  io.stdout(
+    formatCliLabelValue(
+      "Checks",
+      `${report.summary.passed}/${report.summary.checks} passed across ${report.summary.units} unit(s)`,
+      { valueTone: report.ok ? "success" : "warning" },
+    ),
+  );
 
   if (report.validationErrors.length > 0) {
-    io.stdout("Validation Errors:");
+    io.stdout(formatCliText("Validation Errors:", "warning"));
     for (const error of report.validationErrors) {
       io.stdout(`- ${error}`);
     }
   }
 
   for (const unit of report.units) {
-    io.stdout(`- ${unit.id} ${unit.title}: ${unit.passed} passed, ${unit.failed} failed`);
+    io.stdout(
+      `- ${unit.id} ${unit.title}: ${formatCliText(String(unit.passed), "success")} passed, ${formatCliText(String(unit.failed), unit.failed > 0 ? "error" : "muted")} failed`,
+    );
     for (const result of unit.results.filter((entry) => !entry.ok)) {
-      io.stdout(`  fail: ${result.detail}`);
+      io.stdout(`  ${formatCliText("fail:", "error")} ${result.detail}`);
     }
   }
 }
 
 function printSearchReport(report: SearchReport, io: CliIO) {
-  io.stdout(`Search: ${report.query}`);
+  io.stdout(formatCliLabelValue("Search", report.query));
 
   if (report.results.length === 0) {
-    io.stdout("Results: none");
+    io.stdout(formatCliLabelValue("Results", "none", { valueTone: "muted" }));
     return;
   }
 
-  io.stdout(`Results: ${report.results.length}`);
+  io.stdout(formatCliLabelValue("Results", String(report.results.length), { valueTone: "accent" }));
   for (const result of report.results) {
     io.stdout(`- ${result.kind} ${result.path} [${result.reason}]`);
     io.stdout(`  ${result.summary}`);
@@ -2436,10 +2522,14 @@ function printSearchReport(report: SearchReport, io: CliIO) {
 }
 
 function printKnowledgeLintReport(report: KnowledgeLintReport, io: CliIO) {
-  io.stdout(`Knowledge Lint: ${report.ok ? "ok" : "failed"}`);
+  io.stdout(
+    formatCliLabelValue("Knowledge Lint", report.ok ? "ok" : "failed", {
+      valueTone: report.ok ? "success" : "error",
+    }),
+  );
 
   if (report.findings.length === 0) {
-    io.stdout("Findings: none");
+    io.stdout(formatCliLabelValue("Findings", "none", { valueTone: "muted" }));
     return;
   }
 
@@ -3045,7 +3135,7 @@ async function updateAgentsFile(args: {
   }
 
   if (args.dryRun) {
-    args.io.stdout(`[dry-run] update ${args.filePath}`);
+    args.io.stdout(formatCliText(`[dry-run] update ${args.filePath}`, "warning"));
     return;
   }
 
@@ -3055,7 +3145,7 @@ async function updateAgentsFile(args: {
 
   await mkdir(dirname(args.filePath), { recursive: true });
   await writeFile(args.filePath, nextContent, "utf8");
-  args.io.stdout(`updated ${args.filePath}`);
+  args.io.stdout(formatCliText(`updated ${args.filePath}`, "success"));
 }
 
 async function writeManagedFile(args: {
@@ -3065,15 +3155,22 @@ async function writeManagedFile(args: {
   backupEnabled: boolean;
   baseRoot: string;
   dryRun: boolean;
+  overwriteExisting?: boolean;
   io: CliIO;
 }) {
   const wrapped = wrapManagedContent(args.filePath, args.content);
   const exists = await pathExists(args.filePath);
+  const overwriteExisting = args.overwriteExisting ?? true;
 
   if (exists) {
+    if (!overwriteExisting) {
+      args.io.stdout(formatCliText(`preserved ${args.filePath}`, "muted"));
+      return;
+    }
+
     const previous = await readFile(args.filePath, "utf8");
     if (previous === wrapped) {
-      args.io.stdout(`unchanged ${args.filePath}`);
+      args.io.stdout(formatCliText(`unchanged ${args.filePath}`, "muted"));
       return;
     }
     if (args.backupEnabled) {
@@ -3082,13 +3179,13 @@ async function writeManagedFile(args: {
   }
 
   if (args.dryRun) {
-    args.io.stdout(`[dry-run] write ${args.filePath}`);
+    args.io.stdout(formatCliText(`[dry-run] write ${args.filePath}`, "warning"));
     return;
   }
 
   await mkdir(dirname(args.filePath), { recursive: true });
   await writeFile(args.filePath, wrapped, "utf8");
-  args.io.stdout(`wrote ${args.filePath}`);
+  args.io.stdout(formatCliText(`wrote ${args.filePath}`, "success"));
 }
 
 async function writeManagedManifest(args: {
@@ -3107,7 +3204,7 @@ async function writeManagedManifest(args: {
   if (exists) {
     const previous = await readFile(args.filePath, "utf8");
     if (previous === wrapped) {
-      args.io.stdout(`unchanged ${args.filePath}`);
+      args.io.stdout(formatCliText(`unchanged ${args.filePath}`, "muted"));
       return;
     }
     if (args.backupEnabled) {
@@ -3116,13 +3213,60 @@ async function writeManagedManifest(args: {
   }
 
   if (args.dryRun) {
-    args.io.stdout(`[dry-run] write ${args.filePath}`);
+    args.io.stdout(formatCliText(`[dry-run] write ${args.filePath}`, "warning"));
     return;
   }
 
   await mkdir(dirname(args.filePath), { recursive: true });
   await writeFile(args.filePath, wrapped, "utf8");
-  args.io.stdout(`wrote ${args.filePath}`);
+  args.io.stdout(formatCliText(`wrote ${args.filePath}`, "success"));
+}
+
+function buildRoutingPaths(context: RepoContext) {
+  return {
+    manifestFile: relative(context.repoPath, context.manifestPath),
+    instructionsFile: relative(context.repoPath, context.instructionsPath),
+    projectFile: relative(context.repoPath, context.projectFilePath),
+    specsRoot: relative(context.repoPath, context.specsRootPath),
+    changesRoot: relative(context.repoPath, context.changesRootPath),
+    knowledgeRoot: relative(context.repoPath, context.knowledgeRootPath),
+    repoSkillsRoot: relative(context.repoPath, context.repoSkillsPath),
+  };
+}
+
+async function readExistingManifestConfig(filePath: string): Promise<{ workflow?: string[] } | null> {
+  if (!(await pathExists(filePath))) {
+    return null;
+  }
+
+  const content = await readFile(filePath, "utf8");
+  const document = parseDocument(stripManagedHeader(content));
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid manifest.yaml: ${document.errors[0]?.message ?? "unknown YAML parse error"}`);
+  }
+
+  const parsed = manifestSchema.safeParse(document.toJS());
+  if (!parsed.success) {
+    throw new Error(`Invalid manifest.yaml: ${parsed.error.issues[0]?.message ?? "schema validation failed"}`);
+  }
+
+  const data = parsed.data as Record<string, unknown>;
+  return {
+    workflow: readStringArrayField(data.workflow),
+  };
+}
+
+function readStringArrayField(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const normalized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return normalized.length === value.length ? normalized : undefined;
 }
 
 async function buildManagedManifestContent(filePath: string, primaryDocs: string[], tags: string[]): Promise<string> {
@@ -3160,6 +3304,9 @@ function mergeManagedManifest(existing: Record<string, unknown>, managed: Return
     existing.write_policy && typeof existing.write_policy === "object" && !Array.isArray(existing.write_policy)
       ? (existing.write_policy as Record<string, unknown>)
       : {};
+  const existingWorkflow = readStringArrayField(existing.workflow);
+  const existingRefreshScope = readStringArrayField(existing.refresh_scope);
+  const existingNotes = readStringArrayField(existing.notes);
 
   return {
     ...existing,
@@ -3180,14 +3327,14 @@ function mergeManagedManifest(existing: Record<string, unknown>, managed: Return
       canonical_root: existingSkills.canonical_root ?? managed.skills.canonical_root,
     },
     source_docs: managed.source_docs,
-    workflow: managed.workflow,
-    refresh_scope: managed.refresh_scope,
+    workflow: existingWorkflow ?? managed.workflow,
+    refresh_scope: existingRefreshScope ?? managed.refresh_scope,
     write_policy: {
-      ...existingWritePolicy,
       ...managed.write_policy,
+      ...existingWritePolicy,
     },
     default_tags: managed.default_tags,
-    notes: managed.notes,
+    notes: existingNotes ?? managed.notes,
   };
 }
 
@@ -3218,29 +3365,39 @@ async function copyManagedPath(args: {
   }
 
   if (args.dryRun) {
-    args.io.stdout(`[dry-run] copy ${args.sourcePath} -> ${args.targetPath}`);
+    args.io.stdout(formatCliText(`[dry-run] copy ${args.sourcePath} -> ${args.targetPath}`, "warning"));
     return;
   }
 
   await mkdir(dirname(args.targetPath), { recursive: true });
   await cp(args.sourcePath, args.targetPath, { recursive: true });
-  args.io.stdout(`copied ${args.targetPath}`);
+  args.io.stdout(formatCliText(`copied ${args.targetPath}`, "success"));
 }
 
 async function backupExisting(targetPath: string, backupRoot: string, baseRoot: string, dryRun: boolean, io: CliIO) {
   const backupPath = join(backupRoot, relative(baseRoot, targetPath));
 
   if (dryRun) {
-    io.stdout(`[dry-run] backup ${targetPath} -> ${backupPath}`);
+    io.stdout(formatCliText(`[dry-run] backup ${targetPath} -> ${backupPath}`, "warning"));
     return;
   }
 
   await mkdir(dirname(backupPath), { recursive: true });
   await cp(targetPath, backupPath, { recursive: true });
-  io.stdout(`backed up ${targetPath} -> ${backupPath}`);
+  io.stdout(formatCliText(`backed up ${targetPath} -> ${backupPath}`, "success"));
 }
 
-function buildProjectFile(primaryDocs: string[], tags: string[]): string {
+function buildProjectFile(
+  primaryDocs: string[],
+  tags: string[],
+  routes: {
+    instructionsFile: string;
+    specsRoot: string;
+    changeSpecsRoot: string;
+    knowledgeRoot: string;
+    workflow: string[];
+  },
+): string {
   return `# Project Context
 
 This file stores stable repo context for Crabyard agents. Keep it concise and durable.
@@ -3255,11 +3412,12 @@ ${toBulletList(tags.map((tag) => `\`${tag}\``))}
 
 ## Guidance
 
-- Prefer \`${ROOT_DIRNAME}/specs/\` for accepted product truth.
-- Prefer \`${ROOT_DIRNAME}/changes/<slug>/specs/\` for in-flight accepted-truth edits that still need sync.
-- Prefer \`${ROOT_DIRNAME}/knowledge/\` for durable debugging, implementation, and operations notes.
+- Prefer \`${routes.specsRoot}/\` for accepted product truth.
+- Prefer \`${routes.changeSpecsRoot}/\` for in-flight accepted-truth edits that still need sync.
+- Prefer \`${routes.knowledgeRoot}/\` for durable debugging, implementation, and operations notes.
 - Run a knowledge retrieval pass before major decisions in explore, plan, and review.
-- Use the workflow \`research -> explore -> plan -> review -> apply -> review -> verify -> sync -> verify -> archive -> learn/refresh\`.
+- Use the workflow \`${routes.workflow.join(" -> ")}\`.
+- Treat \`${routes.instructionsFile}\` as the canonical repo-instruction file.
 - Update this file only for stable repo-wide context, not task-by-task status.
 `;
 }
@@ -3367,18 +3525,27 @@ Rules:
 `;
 }
 
-function buildAgentsBlock(): string {
+function buildAgentsBlock(routes: {
+  instructionsFile: string;
+  manifestFile: string;
+  projectFile: string;
+  specsRoot: string;
+  changesRoot: string;
+  knowledgeRoot: string;
+  repoSkillsRoot: string;
+  workflow: string[];
+}): string {
   return `## Crabyard Memory
-- Treat \`${INSTRUCTIONS_FILE}\` as the canonical repo-instruction file.
-- Use \`${ROOT_DIRNAME}/${MANIFEST_FILE}\` as the machine-readable routing contract.
-- Use \`${ROOT_DIRNAME}/${PROJECT_FILE}\` for stable repo-wide context.
-- Keep accepted product behavior, contracts, and invariants in \`${ROOT_DIRNAME}/specs/\`.
-- Keep in-flight accepted-truth edits in \`${ROOT_DIRNAME}/changes/<slug>/specs/\`.
-- Keep durable debugging, implementation, and operations notes in \`${ROOT_DIRNAME}/knowledge/\`.
-- Use repo-local skills from \`${REPO_SKILLS_DIR}/\` only.
+- Treat \`${routes.instructionsFile}\` as the canonical repo-instruction file.
+- Use \`${routes.manifestFile}\` as the machine-readable routing contract.
+- Use \`${routes.projectFile}\` for stable repo-wide context.
+- Keep accepted product behavior, contracts, and invariants in \`${routes.specsRoot}/\`.
+- Keep in-flight accepted-truth edits in \`${routes.changesRoot}/<slug>/specs/\`.
+- Keep durable debugging, implementation, and operations notes in \`${routes.knowledgeRoot}/\`.
+- Use repo-local skills from \`${routes.repoSkillsRoot}/\` only.
 - Run a knowledge retrieval pass before major decisions in explore, plan, and review.
-- Prefer the workflow \`research -> explore -> plan -> review -> apply -> review -> verify -> sync -> verify -> archive -> learn/refresh\`.
-- Update \`${ROOT_DIRNAME}/${KNOWLEDGE_INDEX_FILE}\` whenever a knowledge note is created, consolidated, replaced, or removed.
+- Prefer the workflow \`${routes.workflow.join(" -> ")}\`.
+- Update \`${routes.knowledgeRoot}/index.md\` whenever a knowledge note is created, consolidated, replaced, or removed.
 - Do not mirror accepted product truth into knowledge notes.
 `;
 }

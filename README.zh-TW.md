@@ -63,11 +63,13 @@ crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
 ```
 
-CLI 升級後，如果要把既有 repo 的 managed templates 更新到最新版，可以執行：
+CLI 升級後，如果要把既有 repo 中可安全替換的 managed assets 更新到最新版，可以執行：
 
 ```bash
 crabyard update /absolute/path/to/repo
 ```
+
+`update` 會刷新像 repo-local skills 與 `AGENTS.md` managed routing block 這類可安全替換的資產；`project.md`、`knowledge/index.md`、`TASK_EXECUTION_FORMAT.md`、各 bucket 的 `README.md` 這些 repo 自己會持續維護的文件會被保留，只有缺檔時才補回。
 
 只有在你真的想把被取代的 managed files 複製到 `.crabyard/backups/` 時，才加上 `--backup`。
 
@@ -288,7 +290,7 @@ Agent:
 
 - `init`：在專案裡建立 Crabyard 所需的基礎結構
 - `install`：`init` 的別名
-- `update`：更新既有 repo 的 managed assets 與 repo-local skills
+- `update`：更新既有 repo 中可安全替換的 managed assets，同時保留 repo 自己維護的文件
 - `migrate`：把 OpenSpec 的 spec 與 change bundle 複製進 Crabyard
 - `list`：列出專案裡目前有哪些變更
 - `show`：把單一變更包的內容印出來查看

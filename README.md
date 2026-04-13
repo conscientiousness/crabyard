@@ -63,13 +63,15 @@ crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
 ```
 
-After upgrading the CLI, refresh the managed templates in an existing repo with:
+After upgrading the CLI, refresh the replace-safe managed assets in an existing repo with:
 
 ```bash
 crabyard update /absolute/path/to/repo
 ```
 
-Add `--backup` only if you want managed files copied into `.crabyard/backups/` before replacement.
+`update` refreshes replace-safe assets such as repo-local skills and the managed `AGENTS.md` routing block. It preserves repo-authored docs like `project.md`, `knowledge/index.md`, `TASK_EXECUTION_FORMAT.md`, and bucket `README.md` files, only recreating them when missing.
+
+Add `--backup` only if you want replaced managed files copied into `.crabyard/backups/` before refresh.
 
 If the repo already uses OpenSpec, migrate the existing specs and change bundles with:
 
@@ -288,7 +290,7 @@ Agent:
 
 - `init`: set up Crabyard files in a repo
 - `install`: alias for `init`
-- `update`: refresh managed repo assets and repo-local skills in an existing repo
+- `update`: refresh replace-safe managed assets in an existing repo while preserving repo-authored docs
 - `migrate`: copy OpenSpec specs and change bundles into Crabyard
 - `list`: show available changes in the repo
 - `show`: print one change bundle for inspection

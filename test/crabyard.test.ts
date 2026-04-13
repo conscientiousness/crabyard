@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/crabyard.js";
+import { formatCliLabelValue, formatCliText } from "../src/shared.js";
 
 type CliResult = {
   code: number;
@@ -37,6 +38,35 @@ units:
   const result = await run(repoPath, ["validate", "change", "inline-list", "--repo", repoPath]);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /validation passed/i);
+});
+
+test("cli color helpers respect FORCE_COLOR and NO_COLOR", () => {
+  const originalForceColor = process.env.FORCE_COLOR;
+  const originalNoColor = process.env.NO_COLOR;
+
+  try {
+    delete process.env.NO_COLOR;
+    process.env.FORCE_COLOR = "1";
+
+    assert.match(formatCliText("ok", "success"), /\u001b\[/);
+    assert.match(formatCliLabelValue("Repo", "/tmp/example", { valueTone: "accent" }), /\u001b\[/);
+
+    process.env.NO_COLOR = "1";
+    assert.equal(formatCliText("ok", "success"), "ok");
+    assert.equal(formatCliLabelValue("Repo", "/tmp/example", { valueTone: "accent" }), "Repo: /tmp/example");
+  } finally {
+    if (originalForceColor === undefined) {
+      delete process.env.FORCE_COLOR;
+    } else {
+      process.env.FORCE_COLOR = originalForceColor;
+    }
+
+    if (originalNoColor === undefined) {
+      delete process.env.NO_COLOR;
+    } else {
+      process.env.NO_COLOR = originalNoColor;
+    }
+  }
 });
 
 test("unknown depends_on fails validation", async () => {
@@ -496,7 +526,17 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
   assert.equal(initResult.code, 0, initResult.stderr);
 
   const targetSkillPath = join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md");
+  const projectPath = join(repoPath, "crabyard", "project.md");
+  const knowledgeIndexPath = join(repoPath, "crabyard", "knowledge", "index.md");
+  const taskFormatPath = join(repoPath, "crabyard", "TASK_EXECUTION_FORMAT.md");
+  const specsReadmePath = join(repoPath, "crabyard", "specs", "README.md");
+  const changesReadmePath = join(repoPath, "crabyard", "changes", "README.md");
   await writeFile(targetSkillPath, "# stale template\n", "utf8");
+  await writeFile(projectPath, "# Repo Context\n\nKeep this custom context.\n", "utf8");
+  await writeFile(knowledgeIndexPath, "# Knowledge Index\n\n- [custom](./custom.md) - tags: `test`; summary: keep me.\n", "utf8");
+  await writeFile(taskFormatPath, "# Custom Task Format\n", "utf8");
+  await writeFile(specsReadmePath, "# Custom Specs Guide\n", "utf8");
+  await writeFile(changesReadmePath, "# Custom Changes Guide\n", "utf8");
 
   const updateResult = await run(repoPath, ["update", repoPath]);
   assert.equal(updateResult.code, 0, updateResult.stderr);
@@ -504,6 +544,14 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
 
   const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
   assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
+  assert.equal(await readFile(projectPath, "utf8"), "# Repo Context\n\nKeep this custom context.\n");
+  assert.equal(
+    await readFile(knowledgeIndexPath, "utf8"),
+    "# Knowledge Index\n\n- [custom](./custom.md) - tags: `test`; summary: keep me.\n",
+  );
+  assert.equal(await readFile(taskFormatPath, "utf8"), "# Custom Task Format\n");
+  assert.equal(await readFile(specsReadmePath, "utf8"), "# Custom Specs Guide\n");
+  assert.equal(await readFile(changesReadmePath, "utf8"), "# Custom Changes Guide\n");
   assert.equal(await pathExistsOnDisk(join(repoPath, ".crabyard", "backups")), false);
 
   const manifest = await readFile(join(repoPath, "crabyard", "manifest.yaml"), "utf8");
@@ -514,19 +562,40 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
 test("update preserves custom manifest fields and custom managed paths", async () => {
   const repoPath = await createInitializedRepo();
   const manifestPath = join(repoPath, "crabyard", "manifest.yaml");
-  const manifest = await readFile(manifestPath, "utf8");
 
   await writeFile(
     manifestPath,
-    `${manifest
-      .replace("root: crabyard", "root: custom-yard")
-      .replace("project_file: crabyard/project.md", "project_file: custom-yard/project-context.md")
-      .replace("task_format_file: crabyard/TASK_EXECUTION_FORMAT.md", "task_format_file: custom-yard/TASKS.md")
-      .replace("specs_root: crabyard/specs", "specs_root: custom-yard/specs-v2")
-      .replace("changes_root: crabyard/changes", "changes_root: custom-yard/changes-v2")
-      .replace("  root: crabyard/knowledge", "  root: custom-yard/knowledge-base")
-      .replace("  index: crabyard/knowledge/index.md", "  index: custom-yard/knowledge-base/index.md")
-      .replace("  canonical_root: .agents/skills", "  canonical_root: .agents/custom-skills")}\ncustom_field: keep-me\n`,
+    `# Managed by crabyard
+version: 1
+root: custom-yard
+project_file: custom-yard/project-context.md
+task_format_file: custom-yard/TASKS.md
+instructions_file: AGENTS.md
+specs_root: custom-yard/specs-v2
+changes_root: custom-yard/changes-v2
+knowledge:
+  root: custom-yard/knowledge-base
+  index: custom-yard/knowledge-base/index.md
+skills:
+  canonical_root: .agents/custom-skills
+source_docs:
+  - README.md
+workflow:
+  - inspect
+  - implement
+  - verify
+refresh_scope:
+  - custom-yard/knowledge-base
+write_policy:
+  forbid_paths:
+    - CLAUDE.md
+  mutate_agents_only_when_routing_changes: false
+default_tags:
+  - custom-tag
+notes:
+  - Keep this custom note.
+custom_field: keep-me
+`,
     "utf8",
   );
 
@@ -543,6 +612,20 @@ test("update preserves custom manifest fields and custom managed paths", async (
   assert.match(updatedManifest, /index: custom-yard\/knowledge-base\/index\.md/);
   assert.match(updatedManifest, /canonical_root: \.agents\/custom-skills/);
   assert.match(updatedManifest, /custom_field: keep-me/);
+  assert.match(updatedManifest, /workflow:\n  - inspect\n  - implement\n  - verify\n/);
+  assert.match(updatedManifest, /refresh_scope:\n  - custom-yard\/knowledge-base\n/);
+  assert.match(updatedManifest, /mutate_agents_only_when_routing_changes: false/);
+  assert.match(updatedManifest, /notes:\n  - Keep this custom note\.\n/);
+
+  const customProjectPath = join(repoPath, "custom-yard", "project-context.md");
+  const customIndexPath = join(repoPath, "custom-yard", "knowledge-base", "index.md");
+  const customTaskPath = join(repoPath, "custom-yard", "TASKS.md");
+  await writeFile(customProjectPath, "# Preserved Project Context\n", "utf8");
+  await writeFile(customIndexPath, "# Preserved Knowledge Index\n", "utf8");
+  await writeFile(customTaskPath, "# Preserved Task Format\n", "utf8");
+
+  const secondResult = await run(repoPath, ["update", repoPath]);
+  assert.equal(secondResult.code, 0, secondResult.stderr);
 
   await assertPathExists(join(repoPath, "custom-yard", "project-context.md"));
   await assertPathExists(join(repoPath, "custom-yard", "TASKS.md"));
@@ -550,6 +633,35 @@ test("update preserves custom manifest fields and custom managed paths", async (
   await assertPathExists(join(repoPath, "custom-yard", "changes-v2", "README.md"));
   await assertPathExists(join(repoPath, "custom-yard", "knowledge-base", "index.md"));
   await assertPathExists(join(repoPath, ".agents", "custom-skills", "crabyard-apply", "SKILL.md"));
+  assert.equal(await readFile(customProjectPath, "utf8"), "# Preserved Project Context\n");
+  assert.equal(await readFile(customIndexPath, "utf8"), "# Preserved Knowledge Index\n");
+  assert.equal(await readFile(customTaskPath, "utf8"), "# Preserved Task Format\n");
+
+  const agentsContent = await readFile(join(repoPath, "AGENTS.md"), "utf8");
+  assert.match(agentsContent, /Use `custom-yard\/project-context\.md` for stable repo-wide context\./);
+  assert.match(agentsContent, /Keep accepted product behavior, contracts, and invariants in `custom-yard\/specs-v2\/`\./);
+  assert.match(agentsContent, /Keep in-flight accepted-truth edits in `custom-yard\/changes-v2\/<slug>\/specs\/`\./);
+  assert.match(agentsContent, /Keep durable debugging, implementation, and operations notes in `custom-yard\/knowledge-base\/`\./);
+  assert.match(agentsContent, /Use repo-local skills from `\.agents\/custom-skills\/` only\./);
+  assert.match(agentsContent, /Prefer the workflow `inspect -> implement -> verify`\./);
+});
+
+test("update restores missing repo-authored scaffold files without overwriting existing ones", async () => {
+  const repoPath = await createInitializedRepo();
+  const projectPath = join(repoPath, "crabyard", "project.md");
+  const knowledgeIndexPath = join(repoPath, "crabyard", "knowledge", "index.md");
+  const taskFormatPath = join(repoPath, "crabyard", "TASK_EXECUTION_FORMAT.md");
+
+  await rm(projectPath, { force: true });
+  await rm(knowledgeIndexPath, { force: true });
+  await rm(taskFormatPath, { force: true });
+
+  const result = await run(repoPath, ["update", repoPath]);
+  assert.equal(result.code, 0, result.stderr);
+
+  assert.match(await readFile(projectPath, "utf8"), /# Project Context/);
+  assert.match(await readFile(knowledgeIndexPath, "utf8"), /# Knowledge Index/);
+  assert.match(await readFile(taskFormatPath, "utf8"), /# Task Execution Format/);
 });
 
 test("update rejects --skip-repo", async () => {

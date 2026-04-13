@@ -12,6 +12,8 @@ export type CliIO = {
   stderr: (value: string) => void;
 };
 
+export type CliTone = "accent" | "success" | "warning" | "error" | "muted" | "heading";
+
 export type InstallOptions = {
   repoPath: string;
   primaryDocs: string[];
@@ -97,8 +99,50 @@ export function defaultCliIO(): CliIO {
   return {
     cwd: process.cwd(),
     stdout: (value) => console.log(value),
-    stderr: (value) => console.error(value),
+    stderr: (value) => console.error(formatCliText(value, "error", "stderr")),
   };
+}
+
+const ANSI_RESET = "\u001b[0m";
+const ANSI_TONES: Record<CliTone, string> = {
+  accent: "\u001b[36m",
+  success: "\u001b[32m",
+  warning: "\u001b[33m",
+  error: "\u001b[31;1m",
+  muted: "\u001b[90m",
+  heading: "\u001b[1;36m",
+};
+
+function supportsCliColor(stream: "stdout" | "stderr") {
+  if (process.env.NO_COLOR !== undefined) {
+    return false;
+  }
+
+  const forceColor = process.env.FORCE_COLOR;
+  if (forceColor !== undefined) {
+    return forceColor !== "0";
+  }
+
+  const target = stream === "stdout" ? process.stdout : process.stderr;
+  return Boolean(target.isTTY) && process.env.TERM !== "dumb";
+}
+
+export function formatCliText(value: string, tone: CliTone, stream: "stdout" | "stderr" = "stdout") {
+  if (!value || !supportsCliColor(stream)) {
+    return value;
+  }
+
+  return `${ANSI_TONES[tone]}${value}${ANSI_RESET}`;
+}
+
+export function formatCliLabelValue(
+  label: string,
+  value: string,
+  options: { valueTone?: CliTone; stream?: "stdout" | "stderr" } = {},
+) {
+  const stream = options.stream ?? "stdout";
+  const renderedValue = options.valueTone ? formatCliText(value, options.valueTone, stream) : value;
+  return `${formatCliText(`${label}:`, "accent", stream)} ${renderedValue}`;
 }
 
 export function isListTarget(value: string): value is ListTarget {
@@ -242,9 +286,9 @@ export function formatValidationErrors(prefix: string, errors: string[]): string
 }
 
 export function printSection(io: CliIO, title: string, items: string[]) {
-  io.stdout(`${title} (${items.length})`);
+  io.stdout(formatCliText(`${title} (${items.length})`, "heading"));
   if (items.length === 0) {
-    io.stdout("- None");
+    io.stdout(formatCliText("- None", "muted"));
   } else {
     for (const item of items) {
       io.stdout(`- ${item}`);
@@ -255,7 +299,7 @@ export function printSection(io: CliIO, title: string, items: string[]) {
 
 export function printValidationResult(io: CliIO, errors: string[], targetLabel = "Repo") {
   if (errors.length === 0) {
-    io.stdout(`${targetLabel} validation passed.`);
+    io.stdout(formatCliText(`${targetLabel} validation passed.`, "success"));
     return;
   }
 
