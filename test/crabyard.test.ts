@@ -511,6 +511,47 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
   assert.match(manifest, /default_tags:\n  - alpha\n  - beta\n/);
 });
 
+test("update preserves custom manifest fields and custom managed paths", async () => {
+  const repoPath = await createInitializedRepo();
+  const manifestPath = join(repoPath, "crabyard", "manifest.yaml");
+  const manifest = await readFile(manifestPath, "utf8");
+
+  await writeFile(
+    manifestPath,
+    `${manifest
+      .replace("root: crabyard", "root: custom-yard")
+      .replace("project_file: crabyard/project.md", "project_file: custom-yard/project-context.md")
+      .replace("task_format_file: crabyard/TASK_EXECUTION_FORMAT.md", "task_format_file: custom-yard/TASKS.md")
+      .replace("specs_root: crabyard/specs", "specs_root: custom-yard/specs-v2")
+      .replace("changes_root: crabyard/changes", "changes_root: custom-yard/changes-v2")
+      .replace("  root: crabyard/knowledge", "  root: custom-yard/knowledge-base")
+      .replace("  index: crabyard/knowledge/index.md", "  index: custom-yard/knowledge-base/index.md")
+      .replace("  canonical_root: .agents/skills", "  canonical_root: .agents/custom-skills")}\ncustom_field: keep-me\n`,
+    "utf8",
+  );
+
+  const result = await run(repoPath, ["update", repoPath]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const updatedManifest = await readFile(manifestPath, "utf8");
+  assert.match(updatedManifest, /root: custom-yard/);
+  assert.match(updatedManifest, /project_file: custom-yard\/project-context\.md/);
+  assert.match(updatedManifest, /task_format_file: custom-yard\/TASKS\.md/);
+  assert.match(updatedManifest, /specs_root: custom-yard\/specs-v2/);
+  assert.match(updatedManifest, /changes_root: custom-yard\/changes-v2/);
+  assert.match(updatedManifest, /root: custom-yard\/knowledge-base/);
+  assert.match(updatedManifest, /index: custom-yard\/knowledge-base\/index\.md/);
+  assert.match(updatedManifest, /canonical_root: \.agents\/custom-skills/);
+  assert.match(updatedManifest, /custom_field: keep-me/);
+
+  await assertPathExists(join(repoPath, "custom-yard", "project-context.md"));
+  await assertPathExists(join(repoPath, "custom-yard", "TASKS.md"));
+  await assertPathExists(join(repoPath, "custom-yard", "specs-v2", "README.md"));
+  await assertPathExists(join(repoPath, "custom-yard", "changes-v2", "README.md"));
+  await assertPathExists(join(repoPath, "custom-yard", "knowledge-base", "index.md"));
+  await assertPathExists(join(repoPath, ".agents", "custom-skills", "crabyard-apply", "SKILL.md"));
+});
+
 test("update rejects --skip-repo", async () => {
   const repoPath = await createInitializedRepo();
   const result = await run(repoPath, ["update", repoPath, "--skip-repo"]);
@@ -814,6 +855,130 @@ units:
   assert.equal(payload.sync.pendingCount, 1);
 });
 
+test("check executes command and artifact verify specs", async () => {
+  const repoPath = await createInitializedRepo();
+  await mkdir(join(repoPath, "dist"), { recursive: true });
+  await writeFile(join(repoPath, "dist", "checked.js"), "export {};\n", "utf8");
+  await writeChange(repoPath, "checked", {
+    tasks: buildTasks(["Verification Metadata"], false),
+    execution: `version: 1
+tasks_file: tasks.md
+units:
+  - id: T1
+    title: Verification Metadata
+    parallel: false
+    depends_on: []
+    writes: [dist/checked.js]
+    verify:
+      - kind: command
+        run: node -e "process.exit(0)"
+      - kind: artifact
+        path: dist/checked.js
+        state: exists
+`,
+  });
+
+  const result = await run(repoPath, ["check", "checked", "--repo", repoPath, "--json"]);
+  assert.equal(result.code, 0, result.stderr);
+  const payload = parseJson(result.stdout);
+
+  assert.equal(payload.kind, "check");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.summary.checks, 2);
+  assert.equal(payload.summary.failed, 0);
+  assert.equal(payload.units[0].results[0].ok, true);
+  assert.equal(payload.units[0].results[1].ok, true);
+});
+
+test("check reports failing verify checks without depending on task completion", async () => {
+  const repoPath = await createInitializedRepo();
+  await writeChange(repoPath, "failing-check", {
+    tasks: buildTasks(["Verification Metadata"], false),
+    execution: `version: 1
+tasks_file: tasks.md
+units:
+  - id: T1
+    title: Verification Metadata
+    parallel: false
+    depends_on: []
+    writes: [dist/missing.js]
+    verify:
+      - kind: command
+        run: node -e "process.exit(3)"
+      - kind: artifact
+        path: dist/missing.js
+        state: exists
+`,
+  });
+
+  const result = await run(repoPath, ["check", "failing-check", "--repo", repoPath, "--json"]);
+  assert.equal(result.code, 1);
+  const payload = parseJson(result.stdout);
+
+  assert.equal(payload.kind, "check");
+  assert.equal(payload.ok, false);
+  assert.equal(payload.summary.failed, 2);
+  assert.match(result.stderr, /Change check failed/i);
+});
+
+test("search prefers path matches and can include specs", async () => {
+  const repoPath = await createInitializedRepo();
+  await writeKnowledgeNote(repoPath, "oauth-notes.md", "# OAuth Notes\nToken exchange details.\n");
+  await writeKnowledgeIndex(
+    repoPath,
+    "- [OAuth Notes](./oauth-notes.md) - tags: `oauth`; summary: compiled OAuth knowledge.\n",
+  );
+  await writeFile(join(repoPath, "crabyard", "specs", "auth.md"), "# Auth\nCallback exchange contract.\n", "utf8");
+
+  const pathResult = await run(repoPath, ["search", "oauth-notes", "--repo", repoPath, "--json"]);
+  assert.equal(pathResult.code, 0, pathResult.stderr);
+  const pathPayload = parseJson(pathResult.stdout);
+  assert.equal(pathPayload.results[0].path, "crabyard/knowledge/oauth-notes.md");
+  assert.equal(pathPayload.results[0].reason, "path-exact");
+
+  const specResult = await run(repoPath, ["search", "callback", "--repo", repoPath, "--json", "--include-specs"]);
+  assert.equal(specResult.code, 0, specResult.stderr);
+  const specPayload = parseJson(specResult.stdout);
+  assert.equal(specPayload.results[0].kind, "spec");
+  assert.equal(specPayload.results[0].path, "crabyard/specs/auth.md");
+});
+
+test("lint knowledge detects index gaps and invalid frontmatter paths", async () => {
+  const repoPath = await createInitializedRepo();
+  await writeKnowledgeNote(
+    repoPath,
+    "orphan.md",
+    `---
+paths:
+  - src/missing.ts
+---
+
+# Orphan
+`,
+  );
+  await writeKnowledgeNote(repoPath, "indexed.md", "# Indexed\n");
+  await writeKnowledgeIndex(
+    repoPath,
+    [
+      "- [Indexed](./indexed.md) - tags: `alpha`; summary: canonical note.",
+      "- [Indexed Again](./indexed.md) - tags: `beta`; summary: duplicate canonical note.",
+      "- [Missing](./missing.md) - tags: `ghost`; summary: missing target.",
+    ].join("\n"),
+  );
+
+  const result = await run(repoPath, ["lint", "knowledge", "--repo", repoPath, "--json"]);
+  assert.equal(result.code, 1);
+  const payload = parseJson(result.stdout);
+  const codes = payload.findings.map((finding: { code: string }) => finding.code).sort();
+
+  assert.deepEqual(codes, [
+    "frontmatter-path-missing",
+    "index-duplicate-target",
+    "index-target-missing",
+    "note-missing-index",
+  ]);
+});
+
 test("canonical repo-local skills live only under .agents", async () => {
   const repoPath = await createInitializedRepo();
   const canonicalSkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-review", "SKILL.md"), "utf8");
@@ -831,6 +996,8 @@ test("explore, plan, and review skills embed retrieval before deeper work", asyn
 
   assert.match(exploreSkill, /retrieval pass/i);
   assert.match(exploreSkill, /strongest 1-3 prior learnings/i);
+  assert.doesNotMatch(exploreSkill, /next verb/i);
+  assert.match(exploreSkill, /next step in the workflow/i);
   assert.match(planSkill, /repo-local `crabyard-research` skill/i);
   assert.match(reviewSkill, /retrieved knowledge/i);
   assert.match(manifest, /\nworkflow:\n  - research\n/);
@@ -914,6 +1081,16 @@ async function writeOpenSpecChange(
     await mkdir(join(targetPath, ".."), { recursive: true });
     await writeFile(targetPath, content, "utf8");
   }
+}
+
+async function writeKnowledgeNote(repoPath: string, relativePath: string, content: string) {
+  const targetPath = join(repoPath, "crabyard", "knowledge", relativePath);
+  await mkdir(join(targetPath, ".."), { recursive: true });
+  await writeFile(targetPath, content, "utf8");
+}
+
+async function writeKnowledgeIndex(repoPath: string, entries: string) {
+  await writeFile(join(repoPath, "crabyard", "knowledge", "index.md"), `# Knowledge Index\n\n## Entries\n\n${entries}`, "utf8");
 }
 
 function buildTasks(titles: string[], checked = true) {

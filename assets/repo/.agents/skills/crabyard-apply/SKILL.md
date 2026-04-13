@@ -34,8 +34,8 @@ Apply a planned Crabyard change by implementing its bundle safely and keeping sc
    - isolated concurrent execution for eligible units
 8. If safe isolated parallel execution is unavailable, fall back to serial execution.
 9. When running units in parallel, keep each unit within its declared `writes` ownership. Do not rely on hidden cross-unit coordination.
-10. `apply` owns integration. Integrate completed work before leaving apply mode. `review` inspects the integrated result and does not reconcile parallel implementation branches.
-11. Run the relevant unit-level verification before treating a unit as done.
+10. The apply stage owns integration. Integrate completed work before leaving it. The review stage inspects the integrated result and does not reconcile parallel implementation branches.
+11. Run the relevant unit-level verification before treating a unit as done. Use `crabyard check <change>` when you want the normalized `verify` metadata to execute directly instead of only inspecting closure gates.
 12. Mark task progress only after the work is integrated and verified. Keep `tasks.md` checkboxes aligned with integrated progress rather than in-flight work.
 13. Stage accepted-truth edits in `crabyard/changes/<slug>/specs/` instead of mutating `crabyard/specs/` directly.
 14. Stop when the implemented change is integrated, verified at the unit level, and ready for review. If work remains blocked or ambiguous, stop and report the blocker instead of guessing.

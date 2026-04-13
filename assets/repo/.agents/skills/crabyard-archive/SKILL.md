@@ -20,10 +20,11 @@ Archive a completed Crabyard change once implementation and accepted truth are i
 ## Workflow
 
 1. Confirm review has been addressed or consciously accepted.
-2. Run `crabyard verify <change>`.
-3. If staged change specs differ from accepted specs, run `crabyard sync <change>`.
-4. Run `crabyard verify <change>` again after sync.
-5. Run `crabyard archive <change>`.
+2. Run `crabyard check <change>` when the bundle's normalized `verify` metadata should execute for real.
+3. Run `crabyard verify <change>`.
+4. If staged change specs differ from accepted specs, run `crabyard sync <change>`.
+5. Run `crabyard verify <change>` again after sync.
+6. Run `crabyard archive <change>`.
 
 ## Guardrails
 

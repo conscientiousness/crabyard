@@ -22,14 +22,14 @@ Explore the problem, constraints, and likely solution space before committing to
    - keep only the strongest 1-3 prior learnings
 3. Investigate the relevant code, tests, specs, active changes, and retrieved knowledge.
 4. Summarize current behavior, constraints, likely approaches, open questions, and any prior learnings that materially change the decision surface.
-5. Recommend the next verb:
-   - `plan` for a formal change bundle
-   - `debug` for a bounded bug
-   - direct implementation only when the user explicitly rejects the workflow and risk is low
+5. Recommend the next step in the workflow:
+   - move into the planning stage with `plan` for a formal change bundle
+   - use `debug` for a bounded bug
+   - move to direct implementation only when the user explicitly rejects the workflow and risk is low
 
 ## Guardrails
 
-- Do not create a change bundle during explore unless the user explicitly switches to `plan`.
+- Do not create a change bundle during explore unless the user explicitly switches to the planning stage with `plan`.
 - Do not write application code during explore.
 - Keep the output decision-oriented and evidence-backed.
 - Do not dump every knowledge note you found; prefer the smallest useful retrieval set.

@@ -36,7 +36,7 @@ crabyard/changes/<slug>/
   specs/
 ```
 
-`review.md` is optional and should be created later by review work, not by default during plan.
+`review.md` is optional and should be created later during the review stage, not by default during planning.
 
 ## Workflow
 
@@ -55,7 +55,7 @@ crabyard/changes/<slug>/
 
 ## Guardrails
 
-- Do not start implementation during plan.
+- Do not start implementation during the planning stage.
 - Do not create speculative accepted truth.
 - Do not omit `execution.yaml`; Crabyard depends on the explicit execution graph.
 - Do not treat knowledge notes as accepted truth when specs disagree.

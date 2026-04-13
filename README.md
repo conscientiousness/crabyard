@@ -57,6 +57,7 @@ crabyard init /absolute/path/to/repo
 crabyard validate --repo /absolute/path/to/repo
 crabyard status --repo /absolute/path/to/repo
 crabyard status add-auth --repo /absolute/path/to/repo --json
+crabyard check add-auth --repo /absolute/path/to/repo
 crabyard verify add-auth --repo /absolute/path/to/repo
 crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
@@ -86,7 +87,7 @@ A normal first loop looks like this:
 4. run `crabyard validate change <slug> --repo /absolute/path/to/repo`
 5. let the agent use `crabyard status <slug> --repo /absolute/path/to/repo --json`
 6. implement from the ready frontier
-7. run `verify`, `sync`, `verify`, `archive`
+7. run `check`, `verify`, `sync`, `verify`, `archive`
 
 If you prefer `npx`, replace `crabyard` in the examples above with `npx crabyard@latest`.
 
@@ -237,13 +238,18 @@ Overlap checks are segment-aware, so `src/*.ts` and `src/*.md` can run in parall
 
 Legacy `verify: [pnpm test]` remains valid and normalizes to a command check.
 
+Use `crabyard check <change>` when you want those normalized checks to execute for real.
+
 ## The Commands That Actually Matter
 
 The CLI is intentionally small. Most of the time, agents only need a handful of commands, and everything else is there to support that loop:
 
 - `crabyard validate` to reject broken repo or change structure
 - `crabyard status --json` to inspect repo state, change state, frontier, and verification summary
+- `crabyard check` to execute normalized verify metadata for a change
 - `crabyard verify` to enforce deterministic closure gates
+- `crabyard search` to search compiled repo knowledge quickly
+- `crabyard lint knowledge` to detect index drift and malformed knowledge metadata
 - `crabyard sync` to stage accepted-truth updates into canonical specs
 - `crabyard archive` to close only verified and sync-coherent changes
 
@@ -288,9 +294,18 @@ Agent:
 - `show`: print one change bundle for inspection
 - `validate`: check repo or change structure before work continues
 - `status`: inspect repo state, change state, and the current frontier
+- `check`: execute the normalized verify checks for a change
 - `verify`: enforce closure gates for a change
+- `search`: search `crabyard/knowledge/` and optionally `crabyard/specs/`
+- `lint`: currently supports `lint knowledge` for the compiled knowledge layer
 - `sync`: copy accepted-spec updates into canonical specs
 - `archive`: close a verified, sync-coherent change
+
+### `check <change>`
+
+`check` is where typed `verify` metadata becomes executable. It runs normalized command and artifact checks and reports per-unit results.
+
+Unlike `verify`, it does not require `tasks.md` to be fully checked off first. It is meant for executing real checks while work is still in progress.
 
 ### `verify <change>`
 
@@ -398,4 +413,5 @@ Crabyard keeps implementation and debugging notes in `crabyard/knowledge/`, but 
 - `crabyard-research` returns the strongest 1-3 prior learnings before planning, review, or debugging
 - `crabyard-learn` checks overlap before creating a note and updates `knowledge/index.md`
 - `crabyard-refresh` supports targeted refresh, consolidation, replacement, and stale marking
+- optional note frontmatter can add `kind`, `tags`, `paths`, `related_specs`, `related_changes`, `supersedes`, and `last_verified_at`
 - `knowledge/index.md` stays retrieval-friendly and canonical

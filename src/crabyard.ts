@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,7 +54,9 @@ import {
   parseExecutionYaml,
   TaskSection,
   validateExecutionAgainstTasks,
+  VerifyArtifactCheck,
   VerifyCheck,
+  VerifyCommandCheck,
 } from "./execution.js";
 
 const manifestSchema = z
@@ -78,6 +81,24 @@ const manifestSchema = z
         canonical_root: z.string().trim().min(1).optional(),
       })
       .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const nonEmptyStringArraySchema = z.array(z.string().trim().min(1));
+
+const knowledgeFrontmatterSchema = z
+  .object({
+    kind: z.string().trim().min(1).optional(),
+    tags: nonEmptyStringArraySchema.optional(),
+    paths: nonEmptyStringArraySchema.optional(),
+    related_specs: nonEmptyStringArraySchema.optional(),
+    related_changes: nonEmptyStringArraySchema.optional(),
+    supersedes: z.union([z.string().trim().min(1), nonEmptyStringArraySchema]).optional(),
+    last_verified_at: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
   })
   .passthrough();
@@ -108,6 +129,13 @@ type CommonCommandOptions = {
   repoPath: string;
   json: boolean;
   args: string[];
+};
+
+type SearchCommandOptions = {
+  repoPath: string;
+  json: boolean;
+  includeSpecs: boolean;
+  query: string;
 };
 
 type MigrateOptions = {
@@ -225,6 +253,106 @@ type RepoStatusReport = {
   }>;
 };
 
+type CheckResult = {
+  ok: boolean;
+  kind: VerifyCheck["kind"];
+  check: VerifyCheck;
+  detail: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number | null;
+  actualState?: VerifyArtifactCheck["state"];
+  timedOut?: boolean;
+};
+
+type CheckUnitReport = {
+  id: string;
+  title: string;
+  complete: boolean;
+  ready: boolean;
+  blockedBy: string[];
+  passed: number;
+  failed: number;
+  results: CheckResult[];
+};
+
+type CheckReport = {
+  kind: "check";
+  repoPath: string;
+  change: string;
+  ok: boolean;
+  validationErrors: string[];
+  summary: {
+    units: number;
+    checks: number;
+    passed: number;
+    failed: number;
+  };
+  units: CheckUnitReport[];
+};
+
+type SearchResultKind = "knowledge" | "spec";
+
+type SearchResult = {
+  kind: SearchResultKind;
+  path: string;
+  score: number;
+  reason: "path-exact" | "path-match" | "index" | "body";
+  summary: string;
+};
+
+type SearchReport = {
+  kind: "search";
+  repoPath: string;
+  query: string;
+  includeSpecs: boolean;
+  results: SearchResult[];
+};
+
+type KnowledgeLintFinding = {
+  level: "error";
+  code:
+    | "index-target-missing"
+    | "index-duplicate-target"
+    | "note-missing-index"
+    | "frontmatter-parse-error"
+    | "frontmatter-invalid"
+    | "frontmatter-path-missing";
+  path: string;
+  detail: string;
+};
+
+type KnowledgeLintReport = {
+  kind: "lint-knowledge";
+  repoPath: string;
+  ok: boolean;
+  findings: KnowledgeLintFinding[];
+};
+
+type KnowledgeFrontmatter = {
+  kind?: string;
+  tags?: string[];
+  paths?: string[];
+  related_specs?: string[];
+  related_changes?: string[];
+  supersedes?: string | string[];
+  last_verified_at?: string;
+  [key: string]: unknown;
+};
+
+type ParsedMarkdownDocument = {
+  frontmatter: KnowledgeFrontmatter | null;
+  body: string;
+  errors: string[];
+};
+
+type KnowledgeIndexEntry = {
+  label: string;
+  targetPath: string;
+  tags: string[];
+  summary: string;
+};
+
 type ParsedManifestValue = z.infer<typeof manifestSchema>;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -272,8 +400,17 @@ async function dispatch(argv: string[], io: CliIO) {
     case "status":
       await runStatus(rest, io);
       return;
+    case "check":
+      await runCheck(rest, io);
+      return;
     case "verify":
       await runVerify(rest, io);
+      return;
+    case "search":
+      await runSearch(rest, io);
+      return;
+    case "lint":
+      await runLint(rest, io);
       return;
     case "sync":
       await runSync(rest, io);
@@ -303,7 +440,10 @@ Commands:
   validate [repo]                          Validate the repo structure and active changes
   validate change <name>                   Validate a single change bundle
   status [change]                          Show repo status or execution status for a change
+  check <change>                           Execute normalized verify checks for a change
   verify <change>                          Run the deterministic read-only gate for a change
+  search <query>                           Search compiled knowledge (and optionally specs)
+  lint knowledge                           Check the knowledge layer for drift and structure gaps
   sync <change>                            Copy staged change specs into accepted specs
   archive <change>                         Archive a verified and sync-coherent change bundle
 
@@ -320,7 +460,10 @@ Examples:
   pnpm exec tsx src/index.ts update /absolute/path/to/repo
   pnpm exec tsx src/index.ts migrate openspec /absolute/path/to/repo
   node dist/index.js list specs --repo /absolute/path/to/repo
+  node dist/index.js check add-auth --repo /absolute/path/to/repo
   node dist/index.js verify add-auth --repo /absolute/path/to/repo
+  node dist/index.js search auth flow --repo /absolute/path/to/repo --include-specs
+  node dist/index.js lint knowledge --repo /absolute/path/to/repo
   node dist/index.js sync add-auth --repo /absolute/path/to/repo
   node dist/index.js archive add-auth --repo /absolute/path/to/repo
 
@@ -636,6 +779,32 @@ async function runStatus(args: string[], io: CliIO) {
   printChangeStatus(report, io);
 }
 
+async function runCheck(args: string[], io: CliIO) {
+  const { repoPath, json, args: positional } = parseCommonFlags(args, io.cwd);
+
+  if (positional.length !== 1) {
+    throw new Error("Usage: crabyard check <change> [--repo <path>] [--json]");
+  }
+
+  const context = await loadRepoContext(repoPath);
+  const report = await buildCheckReport(context, positional[0]);
+
+  if (json) {
+    printJson(io, report);
+  }
+
+  if (!report.ok) {
+    if (!json) {
+      printCheckReport(report, io);
+    }
+    throw new Error(formatValidationErrors("Change check failed.", collectCheckErrors(report)));
+  }
+
+  if (!json) {
+    printCheckReport(report, io);
+  }
+}
+
 async function runVerify(args: string[], io: CliIO) {
   const { repoPath, json, args: positional } = parseCommonFlags(args, io.cwd);
 
@@ -677,6 +846,45 @@ async function runVerify(args: string[], io: CliIO) {
     io.stdout(`Sync required: ${report.sync.pendingCount} staged spec file(s) differ from accepted specs.`);
   } else {
     io.stdout("Sync state coherent.");
+  }
+}
+
+async function runSearch(args: string[], io: CliIO) {
+  const options = parseSearchArgs(args, io.cwd);
+  const context = await loadRepoContext(options.repoPath);
+  const report = await buildSearchReport(context, options.query, options.includeSpecs);
+
+  if (options.json) {
+    printJson(io, report);
+    return;
+  }
+
+  printSearchReport(report, io);
+}
+
+async function runLint(args: string[], io: CliIO) {
+  const { repoPath, json, args: positional } = parseCommonFlags(args, io.cwd);
+
+  if (positional.length !== 1 || positional[0] !== "knowledge") {
+    throw new Error("Usage: crabyard lint knowledge [--repo <path>] [--json]");
+  }
+
+  const context = await loadRepoContext(repoPath);
+  const report = await buildKnowledgeLintReport(context);
+
+  if (json) {
+    printJson(io, report);
+  }
+
+  if (!report.ok) {
+    if (!json) {
+      printKnowledgeLintReport(report, io);
+    }
+    throw new Error(formatValidationErrors("Knowledge lint failed.", report.findings.map(formatKnowledgeLintFinding)));
+  }
+
+  if (!json) {
+    printKnowledgeLintReport(report, io);
   }
 }
 
@@ -911,6 +1119,50 @@ function parseCommonFlags(args: string[], cwd: string): CommonCommandOptions {
   };
 }
 
+function parseSearchArgs(args: string[], cwd: string): SearchCommandOptions {
+  let repoPath = cwd;
+  let json = false;
+  let includeSpecs = false;
+  const positional: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+
+    if (value === "--repo") {
+      const next = args[index + 1];
+      if (!next) {
+        throw new Error("`--repo` requires a path.");
+      }
+      repoPath = next;
+      index += 1;
+      continue;
+    }
+
+    if (value === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (value === "--include-specs") {
+      includeSpecs = true;
+      continue;
+    }
+
+    positional.push(value);
+  }
+
+  if (positional.length === 0) {
+    throw new Error("Usage: crabyard search <query> [--repo <path>] [--json] [--include-specs]");
+  }
+
+  return {
+    repoPath: resolve(repoPath),
+    json,
+    includeSpecs,
+    query: positional.join(" ").trim(),
+  };
+}
+
 function parseRepoFlag(args: string[], cwd: string): { repoPath: string; args: string[] } {
   let repoPath = cwd;
   const positional: string[] = [];
@@ -982,7 +1234,7 @@ export async function loadRepoContext(repoPath: string): Promise<RepoContext> {
     repoPath,
     rootDir,
     rootPath: resolveRepoRelative(repoPath, rootDir),
-    manifestPath: resolveRepoRelative(repoPath, join(rootDir, MANIFEST_FILE)),
+    manifestPath: defaultManifestPath,
     projectFilePath: resolveRepoRelative(repoPath, manifest?.projectFile ?? join(rootDir, PROJECT_FILE)),
     taskFormatPath: resolveRepoRelative(repoPath, manifest?.taskFormatFile ?? join(rootDir, TASK_FORMAT_FILE)),
     instructionsPath: resolveRepoRelative(repoPath, manifest?.instructionsFile ?? INSTRUCTIONS_FILE),
@@ -1033,13 +1285,14 @@ async function installRepoAssets(args: {
   io: CliIO;
 }) {
   const backupRoot = join(args.repoPath, BACKUP_DIRNAME, "backups", args.timestamp);
+  const context = await loadRepoContext(args.repoPath);
 
   args.io.stdout(`Installing repo assets -> ${args.repoPath}`);
 
   for (const skillName of REPO_SKILL_NAMES) {
     await copyManagedPath({
       sourcePath: join(REPO_ASSETS_ROOT, REPO_SKILLS_DIR, skillName),
-      targetPath: join(args.repoPath, REPO_SKILLS_DIR, skillName),
+      targetPath: join(context.repoSkillsPath, skillName),
       backupRoot,
       backupEnabled: args.backup,
       baseRoot: args.repoPath,
@@ -1049,7 +1302,7 @@ async function installRepoAssets(args: {
   }
 
   await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, PROJECT_FILE),
+    filePath: context.projectFilePath,
     content: buildProjectFile(args.primaryDocs, args.tags),
     backupRoot,
     backupEnabled: args.backup,
@@ -1058,9 +1311,10 @@ async function installRepoAssets(args: {
     io: args.io,
   });
 
-  await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, MANIFEST_FILE),
-    content: buildManifest(args.primaryDocs, args.tags),
+  await writeManagedManifest({
+    filePath: context.manifestPath,
+    primaryDocs: args.primaryDocs,
+    tags: args.tags,
     backupRoot,
     backupEnabled: args.backup,
     baseRoot: args.repoPath,
@@ -1069,7 +1323,7 @@ async function installRepoAssets(args: {
   });
 
   await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, TASK_FORMAT_FILE),
+    filePath: context.taskFormatPath,
     content: await readFile(join(REPO_ASSETS_ROOT, ROOT_DIRNAME, TASK_FORMAT_FILE), "utf8"),
     backupRoot,
     backupEnabled: args.backup,
@@ -1079,7 +1333,7 @@ async function installRepoAssets(args: {
   });
 
   await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, "specs", "README.md"),
+    filePath: join(context.specsRootPath, "README.md"),
     content: buildBucketReadme(
       "Specs",
       "Store accepted product behavior, contracts, and invariants here. Sync staged change specs into this tree with `crabyard sync <change>`.",
@@ -1092,7 +1346,7 @@ async function installRepoAssets(args: {
   });
 
   await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, "changes", "README.md"),
+    filePath: join(context.changesRootPath, "README.md"),
     content: buildChangesReadme(),
     backupRoot,
     backupEnabled: args.backup,
@@ -1102,7 +1356,7 @@ async function installRepoAssets(args: {
   });
 
   await writeManagedFile({
-    filePath: join(args.repoPath, ROOT_DIRNAME, KNOWLEDGE_INDEX_FILE),
+    filePath: context.knowledgeIndexPath,
     content: buildKnowledgeIndex(),
     backupRoot,
     backupEnabled: args.backup,
@@ -1112,7 +1366,7 @@ async function installRepoAssets(args: {
   });
 
   await updateAgentsFile({
-    filePath: join(args.repoPath, INSTRUCTIONS_FILE),
+    filePath: context.instructionsPath,
     content: buildAgentsBlock(),
     backupRoot,
     backupEnabled: args.backup,
@@ -1824,6 +2078,224 @@ async function buildChangeStatus(context: RepoContext, changeName: string): Prom
   };
 }
 
+async function buildCheckReport(context: RepoContext, changeName: string): Promise<CheckReport> {
+  const changeDir = await findChangeDirectory(context, changeName, false);
+  const validation = await validateChangeDirectory(changeDir);
+
+  if (!validation.execution || validation.errors.length > 0) {
+    return {
+      kind: "check",
+      repoPath: context.repoPath,
+      change: basename(changeDir),
+      ok: false,
+      validationErrors: validation.errors,
+      summary: {
+        units: validation.execution?.units.length ?? 0,
+        checks: 0,
+        passed: 0,
+        failed: 0,
+      },
+      units: [],
+    };
+  }
+
+  const taskSections = validation.tasksContent ? parseTaskSections(validation.tasksContent) : [];
+  const unitStatuses = buildUnitStatuses(validation.execution, taskSections);
+  const reports: CheckUnitReport[] = [];
+
+  for (const unit of unitStatuses) {
+    const results: CheckResult[] = [];
+
+    for (const check of unit.verify) {
+      results.push(await executeVerifyCheck(context.repoPath, check));
+    }
+
+    reports.push({
+      id: unit.id,
+      title: unit.title,
+      complete: unit.complete,
+      ready: unit.ready,
+      blockedBy: unit.blockedBy,
+      passed: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      results,
+    });
+  }
+
+  const passed = reports.reduce((sum, unit) => sum + unit.passed, 0);
+  const failed = reports.reduce((sum, unit) => sum + unit.failed, 0);
+
+  return {
+    kind: "check",
+    repoPath: context.repoPath,
+    change: basename(changeDir),
+    ok: validation.errors.length === 0 && failed === 0,
+    validationErrors: validation.errors,
+    summary: {
+      units: reports.length,
+      checks: passed + failed,
+      passed,
+      failed,
+    },
+    units: reports,
+  };
+}
+
+async function executeVerifyCheck(repoPath: string, check: VerifyCheck): Promise<CheckResult> {
+  return check.kind === "command" ? executeCommandCheck(repoPath, check) : executeArtifactCheck(repoPath, check);
+}
+
+async function executeCommandCheck(repoPath: string, check: VerifyCommandCheck): Promise<CheckResult> {
+  let cwd = repoPath;
+
+  try {
+    cwd = check.cwd ? resolveRepoRelative(repoPath, check.cwd) : repoPath;
+  } catch (error) {
+    return {
+      ok: false,
+      kind: "command",
+      check,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  return new Promise((resolveResult) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const commandLabel = check.argv ? check.argv.join(" ") : check.run ?? "";
+
+    const child = check.argv
+      ? spawn(check.argv[0], check.argv.slice(1), { cwd, stdio: ["ignore", "pipe", "pipe"] })
+      : spawn(check.run ?? "", { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] });
+
+    const finish = (result: CheckResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+      resolveResult(result);
+    };
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      finish({
+        ok: false,
+        kind: "command",
+        check,
+        detail: `command failed to start: ${error.message}`,
+        stdout: stdout.trim() || undefined,
+        stderr: stderr.trim() || undefined,
+      });
+    });
+
+    if (check.timeoutMs) {
+      killTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, check.timeoutMs);
+    }
+
+    child.on("close", (code, signal) => {
+      const stdoutValue = stdout.trim() || undefined;
+      const stderrValue = stderr.trim() || undefined;
+
+      if (timedOut) {
+        finish({
+          ok: false,
+          kind: "command",
+          check,
+          detail: `timed out after ${check.timeoutMs}ms: ${commandLabel}`,
+          stdout: stdoutValue,
+          stderr: stderrValue,
+          exitCode: code,
+          timedOut: true,
+        });
+        return;
+      }
+
+      if (code === check.expectExitCode) {
+        finish({
+          ok: true,
+          kind: "command",
+          check,
+          detail: `exit ${code}: ${commandLabel}`,
+          stdout: stdoutValue,
+          stderr: stderrValue,
+          exitCode: code,
+        });
+        return;
+      }
+
+      finish({
+        ok: false,
+        kind: "command",
+        check,
+        detail:
+          signal !== null
+            ? `terminated by ${signal}: ${commandLabel}`
+            : `expected exit ${check.expectExitCode}, got ${code ?? "null"}: ${commandLabel}`,
+        stdout: stdoutValue,
+        stderr: stderrValue,
+        exitCode: code,
+      });
+    });
+  });
+}
+
+async function executeArtifactCheck(repoPath: string, check: VerifyArtifactCheck): Promise<CheckResult> {
+  let targetPath = "";
+
+  try {
+    targetPath = resolveRepoRelative(repoPath, check.path);
+  } catch (error) {
+    return {
+      ok: false,
+      kind: "artifact",
+      check,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const exists = await pathExists(targetPath);
+  const actualState: VerifyArtifactCheck["state"] = exists ? "exists" : "missing";
+  const ok = actualState === check.state;
+
+  return {
+    ok,
+    kind: "artifact",
+    check,
+    detail: `${relative(repoPath, targetPath)} is ${actualState}`,
+    actualState,
+  };
+}
+
+function collectCheckErrors(report: CheckReport): string[] {
+  const errors = [...report.validationErrors];
+
+  for (const unit of report.units) {
+    for (const result of unit.results) {
+      if (!result.ok) {
+        errors.push(`${unit.id} ${unit.title}: ${result.detail}`);
+      }
+    }
+  }
+
+  return errors;
+}
+
 function buildUnitStatuses(execution: ParsedExecution | null, taskSections: TaskSection[]): ChangeUnitStatus[] {
   if (!execution) {
     return [];
@@ -1927,6 +2399,57 @@ function printChangeStatus(report: ChangeStatusReport, io: CliIO) {
       io.stdout(`- ${error}`);
     }
   }
+}
+
+function printCheckReport(report: CheckReport, io: CliIO) {
+  io.stdout(`Check: ${report.change}`);
+  io.stdout(`Checks: ${report.summary.passed}/${report.summary.checks} passed across ${report.summary.units} unit(s)`);
+
+  if (report.validationErrors.length > 0) {
+    io.stdout("Validation Errors:");
+    for (const error of report.validationErrors) {
+      io.stdout(`- ${error}`);
+    }
+  }
+
+  for (const unit of report.units) {
+    io.stdout(`- ${unit.id} ${unit.title}: ${unit.passed} passed, ${unit.failed} failed`);
+    for (const result of unit.results.filter((entry) => !entry.ok)) {
+      io.stdout(`  fail: ${result.detail}`);
+    }
+  }
+}
+
+function printSearchReport(report: SearchReport, io: CliIO) {
+  io.stdout(`Search: ${report.query}`);
+
+  if (report.results.length === 0) {
+    io.stdout("Results: none");
+    return;
+  }
+
+  io.stdout(`Results: ${report.results.length}`);
+  for (const result of report.results) {
+    io.stdout(`- ${result.kind} ${result.path} [${result.reason}]`);
+    io.stdout(`  ${result.summary}`);
+  }
+}
+
+function printKnowledgeLintReport(report: KnowledgeLintReport, io: CliIO) {
+  io.stdout(`Knowledge Lint: ${report.ok ? "ok" : "failed"}`);
+
+  if (report.findings.length === 0) {
+    io.stdout("Findings: none");
+    return;
+  }
+
+  for (const finding of report.findings) {
+    io.stdout(`- ${formatKnowledgeLintFinding(finding)}`);
+  }
+}
+
+function formatKnowledgeLintFinding(finding: KnowledgeLintFinding): string {
+  return `${finding.code} ${finding.path}: ${finding.detail}`;
 }
 
 function formatVerifyCheck(check: VerifyCheck): string {
@@ -2105,6 +2628,305 @@ function formatSyncPlanErrors(plan: SyncPlan): string[] {
   return plan.pending.map((entry) => `Pending spec sync (${entry.action}): ${entry.relativePath}`);
 }
 
+async function buildSearchReport(context: RepoContext, query: string, includeSpecs: boolean): Promise<SearchReport> {
+  const normalizedQuery = query.trim().toLowerCase();
+  const querySlug = toKebabCase(query);
+  const results: SearchResult[] = [];
+  const knowledgeEntries = await loadKnowledgeIndexEntries(context);
+  const knowledgeEntryByPath = new Map(knowledgeEntries.map((entry) => [entry.targetPath, entry]));
+  const knowledgeNotes = await listMarkdownFiles(context.knowledgeRootPath, new Set(["index.md"]));
+
+  for (const notePath of knowledgeNotes) {
+    const repoRelativePath = relative(context.repoPath, notePath).replace(/\\/g, "/");
+    const parsed = await parseMarkdownDocument(await readFile(notePath, "utf8"));
+    const indexEntry = knowledgeEntryByPath.get(repoRelativePath);
+    const match = rankSearchTarget({
+      query: normalizedQuery,
+      querySlug,
+      path: repoRelativePath,
+      pathForMatch: relative(context.knowledgeRootPath, notePath).replace(/\\/g, "/"),
+      body: parsed.body,
+      indexEntry,
+    });
+
+    if (match) {
+      results.push({
+        kind: "knowledge",
+        path: repoRelativePath,
+        score: match.score,
+        reason: match.reason,
+        summary: indexEntry?.summary || match.summary,
+      });
+    }
+  }
+
+  if (includeSpecs) {
+    const specFiles = await listMarkdownFiles(context.specsRootPath, new Set(["README.md"]));
+
+    for (const specPath of specFiles) {
+      const repoRelativePath = relative(context.repoPath, specPath).replace(/\\/g, "/");
+      const parsed = await parseMarkdownDocument(await readFile(specPath, "utf8"));
+      const match = rankSearchTarget({
+        query: normalizedQuery,
+        querySlug,
+        path: repoRelativePath,
+        pathForMatch: relative(context.specsRootPath, specPath).replace(/\\/g, "/"),
+        body: parsed.body,
+      });
+
+      if (match) {
+        results.push({
+          kind: "spec",
+          path: repoRelativePath,
+          score: match.score,
+          reason: match.reason,
+          summary: match.summary,
+        });
+      }
+    }
+  }
+
+  results.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
+
+  return {
+    kind: "search",
+    repoPath: context.repoPath,
+    query,
+    includeSpecs,
+    results,
+  };
+}
+
+async function buildKnowledgeLintReport(context: RepoContext): Promise<KnowledgeLintReport> {
+  const findings: KnowledgeLintFinding[] = [];
+  const noteFiles = await listMarkdownFiles(context.knowledgeRootPath, new Set(["index.md"]));
+  const indexEntries = await loadKnowledgeIndexEntries(context);
+  const indexTargets = new Map<string, number>();
+
+  for (const entry of indexEntries) {
+    indexTargets.set(entry.targetPath, (indexTargets.get(entry.targetPath) ?? 0) + 1);
+
+    const absoluteTargetPath = resolve(context.repoPath, entry.targetPath);
+    if (!(await pathExists(absoluteTargetPath))) {
+      findings.push({
+        level: "error",
+        code: "index-target-missing",
+        path: entry.targetPath,
+        detail: "knowledge/index.md points to a missing note",
+      });
+    }
+  }
+
+  for (const [targetPath, count] of indexTargets.entries()) {
+    if (count > 1) {
+      findings.push({
+        level: "error",
+        code: "index-duplicate-target",
+        path: targetPath,
+        detail: `knowledge/index.md references this note ${count} times`,
+      });
+    }
+  }
+
+  const indexedTargets = new Set(indexEntries.map((entry) => entry.targetPath));
+
+  for (const notePath of noteFiles) {
+    const repoRelativePath = relative(context.repoPath, notePath).replace(/\\/g, "/");
+    if (!indexedTargets.has(repoRelativePath)) {
+      findings.push({
+        level: "error",
+        code: "note-missing-index",
+        path: repoRelativePath,
+        detail: "knowledge note has no canonical index entry",
+      });
+    }
+
+    const parsed = await parseMarkdownDocument(await readFile(notePath, "utf8"));
+    for (const error of parsed.errors) {
+      findings.push({
+        level: "error",
+        code: "frontmatter-parse-error",
+        path: repoRelativePath,
+        detail: error,
+      });
+    }
+
+    if (parsed.frontmatter) {
+      const validated = knowledgeFrontmatterSchema.safeParse(parsed.frontmatter);
+      if (!validated.success) {
+        findings.push({
+          level: "error",
+          code: "frontmatter-invalid",
+          path: repoRelativePath,
+          detail: validated.error.issues.map((issue) => issue.message).join("; "),
+        });
+        continue;
+      }
+
+      for (const referencedPath of validated.data.paths ?? []) {
+        let resolvedPath = "";
+
+        try {
+          resolvedPath = resolveRepoRelative(context.repoPath, referencedPath);
+        } catch (error) {
+          findings.push({
+            level: "error",
+            code: "frontmatter-path-missing",
+            path: repoRelativePath,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          continue;
+        }
+
+        if (!(await pathExists(resolvedPath))) {
+          findings.push({
+            level: "error",
+            code: "frontmatter-path-missing",
+            path: repoRelativePath,
+            detail: `frontmatter path does not exist: ${referencedPath}`,
+          });
+        }
+      }
+    }
+  }
+
+  findings.sort((left, right) => left.path.localeCompare(right.path) || left.code.localeCompare(right.code));
+
+  return {
+    kind: "lint-knowledge",
+    repoPath: context.repoPath,
+    ok: findings.length === 0,
+    findings,
+  };
+}
+
+async function loadKnowledgeIndexEntries(context: RepoContext): Promise<KnowledgeIndexEntry[]> {
+  if (!(await pathExists(context.knowledgeIndexPath))) {
+    return [];
+  }
+
+  const content = await readFile(context.knowledgeIndexPath, "utf8");
+  const entries: KnowledgeIndexEntry[] = [];
+  const indexDir = dirname(context.knowledgeIndexPath);
+
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s+\[([^\]]+)\]\(([^)]+)\)(?:\s+-\s*(.*))?$/);
+    if (!match) {
+      continue;
+    }
+
+    const [, label, rawTarget, metadata = ""] = match;
+    const targetPath = relative(context.repoPath, resolve(indexDir, rawTarget)).replace(/\\/g, "/");
+    const tags = [...metadata.matchAll(/`([^`]+)`/g)].map((entry) => entry[1]);
+    const summaryMatch = metadata.match(/summary:\s*([^;]+)/i);
+
+    entries.push({
+      label,
+      targetPath,
+      tags,
+      summary: summaryMatch ? summaryMatch[1].trim() : metadata.trim(),
+    });
+  }
+
+  return entries;
+}
+
+async function parseMarkdownDocument(content: string): Promise<ParsedMarkdownDocument> {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
+    return {
+      frontmatter: null,
+      body: content,
+      errors: [],
+    };
+  }
+
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) {
+    return {
+      frontmatter: null,
+      body: content,
+      errors: ["frontmatter fence is not closed"],
+    };
+  }
+
+  const document = parseDocument(match[1]);
+  if (document.errors.length > 0) {
+    return {
+      frontmatter: null,
+      body: match[2],
+      errors: document.errors.map((error) => error.message),
+    };
+  }
+
+  const data = document.toJS();
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return {
+      frontmatter: null,
+      body: match[2],
+      errors: ["frontmatter must parse to an object"],
+    };
+  }
+
+  return {
+    frontmatter: data as KnowledgeFrontmatter,
+    body: match[2],
+    errors: [],
+  };
+}
+
+function rankSearchTarget(args: {
+  query: string;
+  querySlug: string;
+  path: string;
+  pathForMatch: string;
+  body: string;
+  indexEntry?: KnowledgeIndexEntry;
+}): { score: number; reason: SearchResult["reason"]; summary: string } | null {
+  const normalizedPath = args.pathForMatch.toLowerCase();
+  const normalizedBase = basename(args.pathForMatch, ".md").toLowerCase();
+
+  if (args.querySlug && (normalizedBase === args.querySlug || normalizedPath.replace(/\.md$/i, "") === args.querySlug)) {
+    return {
+      score: 300,
+      reason: "path-exact",
+      summary: `path exactly matches "${args.querySlug}"`,
+    };
+  }
+
+  if (args.querySlug && (normalizedBase.includes(args.querySlug) || normalizedPath.includes(args.querySlug))) {
+    return {
+      score: 250,
+      reason: "path-match",
+      summary: `path matches "${args.querySlug}"`,
+    };
+  }
+
+  if (args.indexEntry) {
+    const indexText = `${args.indexEntry.tags.join(" ")} ${args.indexEntry.summary}`.toLowerCase();
+    if (args.query && indexText.includes(args.query)) {
+      return {
+        score: 200,
+        reason: "index",
+        summary: args.indexEntry.summary || `index tags: ${args.indexEntry.tags.join(", ")}`,
+      };
+    }
+  }
+
+  const bodyLine = args.body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.toLowerCase().includes(args.query));
+  if (args.query && bodyLine) {
+    return {
+      score: 100,
+      reason: "body",
+      summary: bodyLine,
+    };
+  }
+
+  return null;
+}
+
 function printJson(io: CliIO, value: unknown) {
   io.stdout(JSON.stringify(value, null, 2));
 }
@@ -2269,6 +3091,110 @@ async function writeManagedFile(args: {
   args.io.stdout(`wrote ${args.filePath}`);
 }
 
+async function writeManagedManifest(args: {
+  filePath: string;
+  primaryDocs: string[];
+  tags: string[];
+  backupRoot: string;
+  backupEnabled: boolean;
+  baseRoot: string;
+  dryRun: boolean;
+  io: CliIO;
+}) {
+  const wrapped = await buildManagedManifestContent(args.filePath, args.primaryDocs, args.tags);
+  const exists = await pathExists(args.filePath);
+
+  if (exists) {
+    const previous = await readFile(args.filePath, "utf8");
+    if (previous === wrapped) {
+      args.io.stdout(`unchanged ${args.filePath}`);
+      return;
+    }
+    if (args.backupEnabled) {
+      await backupExisting(args.filePath, args.backupRoot, args.baseRoot, args.dryRun, args.io);
+    }
+  }
+
+  if (args.dryRun) {
+    args.io.stdout(`[dry-run] write ${args.filePath}`);
+    return;
+  }
+
+  await mkdir(dirname(args.filePath), { recursive: true });
+  await writeFile(args.filePath, wrapped, "utf8");
+  args.io.stdout(`wrote ${args.filePath}`);
+}
+
+async function buildManagedManifestContent(filePath: string, primaryDocs: string[], tags: string[]): Promise<string> {
+  if (!(await pathExists(filePath))) {
+    return wrapManagedContent(filePath, buildManifest(primaryDocs, tags));
+  }
+
+  const current = await readFile(filePath, "utf8");
+  const document = parseDocument(stripManagedHeader(current));
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid manifest.yaml: ${document.errors[0]?.message ?? "unknown YAML parse error"}`);
+  }
+
+  const parsed = manifestSchema.safeParse(document.toJS());
+  if (!parsed.success) {
+    throw new Error(`Invalid manifest.yaml: ${parsed.error.issues[0]?.message ?? "schema validation failed"}`);
+  }
+
+  const rootDir = parsed.data.root ?? ROOT_DIRNAME;
+  const existing = document.toJS() as Record<string, unknown>;
+  const merged = mergeManagedManifest(existing, buildManagedManifestData(rootDir, primaryDocs, tags));
+  return wrapManagedContent(filePath, stringify(merged));
+}
+
+function mergeManagedManifest(existing: Record<string, unknown>, managed: ReturnType<typeof buildManagedManifestData>) {
+  const existingKnowledge =
+    existing.knowledge && typeof existing.knowledge === "object" && !Array.isArray(existing.knowledge)
+      ? (existing.knowledge as Record<string, unknown>)
+      : {};
+  const existingSkills =
+    existing.skills && typeof existing.skills === "object" && !Array.isArray(existing.skills)
+      ? (existing.skills as Record<string, unknown>)
+      : {};
+  const existingWritePolicy =
+    existing.write_policy && typeof existing.write_policy === "object" && !Array.isArray(existing.write_policy)
+      ? (existing.write_policy as Record<string, unknown>)
+      : {};
+
+  return {
+    ...existing,
+    version: managed.version,
+    root: existing.root ?? managed.root,
+    project_file: existing.project_file ?? managed.project_file,
+    task_format_file: existing.task_format_file ?? managed.task_format_file,
+    instructions_file: existing.instructions_file ?? managed.instructions_file,
+    specs_root: existing.specs_root ?? managed.specs_root,
+    changes_root: existing.changes_root ?? managed.changes_root,
+    knowledge: {
+      ...existingKnowledge,
+      root: existingKnowledge.root ?? managed.knowledge.root,
+      index: existingKnowledge.index ?? managed.knowledge.index,
+    },
+    skills: {
+      ...existingSkills,
+      canonical_root: existingSkills.canonical_root ?? managed.skills.canonical_root,
+    },
+    source_docs: managed.source_docs,
+    workflow: managed.workflow,
+    refresh_scope: managed.refresh_scope,
+    write_policy: {
+      ...existingWritePolicy,
+      ...managed.write_policy,
+    },
+    default_tags: managed.default_tags,
+    notes: managed.notes,
+  };
+}
+
+function stripManagedHeader(content: string): string {
+  return content.replace(/^# Managed by [^\n]+\n/, "");
+}
+
 async function copyManagedPath(args: {
   sourcePath: string;
   targetPath: string;
@@ -2338,58 +3264,42 @@ ${toBulletList(tags.map((tag) => `\`${tag}\``))}
 `;
 }
 
+function buildManagedManifestData(rootDir: string, primaryDocs: string[], tags: string[]) {
+  return {
+    version: 1,
+    root: rootDir,
+    project_file: `${rootDir}/${PROJECT_FILE}`,
+    task_format_file: `${rootDir}/${TASK_FORMAT_FILE}`,
+    instructions_file: INSTRUCTIONS_FILE,
+    specs_root: `${rootDir}/specs`,
+    changes_root: `${rootDir}/changes`,
+    knowledge: {
+      root: `${rootDir}/knowledge`,
+      index: `${rootDir}/${KNOWLEDGE_INDEX_FILE}`,
+    },
+    skills: {
+      canonical_root: REPO_SKILLS_DIR,
+    },
+    source_docs: primaryDocs,
+    workflow: ["research", "explore", "plan", "review", "apply", "review", "verify", "sync", "verify", "archive", "learn", "refresh"],
+    refresh_scope: [`${rootDir}/knowledge`],
+    write_policy: {
+      forbid_paths: ["CLAUDE.md"],
+      mutate_agents_only_when_routing_changes: true,
+    },
+    default_tags: tags,
+    notes: [
+      `Keep accepted product behavior and contracts in ${rootDir}/specs.`,
+      `Keep in-flight accepted-truth edits in ${rootDir}/changes/<slug>/specs.`,
+      `Keep durable implementation and debugging notes in ${rootDir}/knowledge.`,
+      `Use retrieval from ${rootDir}/knowledge before major decisions in explore, plan, and review.`,
+      `Treat ${INSTRUCTIONS_FILE} as the canonical repo-instruction file.`,
+    ],
+  };
+}
+
 function buildManifest(primaryDocs: string[], tags: string[]): string {
-  return `version: 1
-root: ${ROOT_DIRNAME}
-project_file: ${ROOT_DIRNAME}/${PROJECT_FILE}
-task_format_file: ${ROOT_DIRNAME}/${TASK_FORMAT_FILE}
-instructions_file: ${INSTRUCTIONS_FILE}
-
-specs_root: ${ROOT_DIRNAME}/specs
-changes_root: ${ROOT_DIRNAME}/changes
-
-knowledge:
-  root: ${ROOT_DIRNAME}/knowledge
-  index: ${ROOT_DIRNAME}/${KNOWLEDGE_INDEX_FILE}
-
-skills:
-  canonical_root: ${REPO_SKILLS_DIR}
-
-source_docs:
-${formatYamlList(primaryDocs, 2)}
-
-workflow:
-  - research
-  - explore
-  - plan
-  - review
-  - apply
-  - review
-  - verify
-  - sync
-  - verify
-  - archive
-  - learn
-  - refresh
-
-refresh_scope:
-  - ${ROOT_DIRNAME}/knowledge
-
-write_policy:
-  forbid_paths:
-    - CLAUDE.md
-  mutate_agents_only_when_routing_changes: true
-
-default_tags:
-${formatYamlList(tags, 2)}
-
-notes:
-  - Keep accepted product behavior and contracts in ${ROOT_DIRNAME}/specs.
-  - Keep in-flight accepted-truth edits in ${ROOT_DIRNAME}/changes/<slug>/specs.
-  - Keep durable implementation and debugging notes in ${ROOT_DIRNAME}/knowledge.
-  - Use retrieval from ${ROOT_DIRNAME}/knowledge before major decisions in explore, plan, and review.
-  - Treat ${INSTRUCTIONS_FILE} as the canonical repo-instruction file.
-`;
+  return stringify(buildManagedManifestData(ROOT_DIRNAME, primaryDocs, tags));
 }
 
 function buildBucketReadme(title: string, summary: string): string {
@@ -2428,6 +3338,7 @@ Required change layout:
 - \`execution.yaml\` is the explicit execution graph and must stay trustworthy.
 - \`specs/\` stages accepted-truth updates before \`crabyard sync <change>\`.
 - \`review.md\` is optional but recommended for prioritized findings before verify.
+- Use \`crabyard check <change>\` when you want to execute the normalized verify metadata instead of only checking closure gates.
 `;
 }
 
@@ -2448,6 +3359,7 @@ Rules:
 - Update entries when a note is consolidated, replaced, or superseded.
 - Prefer focused notes over broad catch-all documents.
 - Keep tags and summaries specific enough that retrieval can rank strong matches quickly.
+- Optional note frontmatter may include \`kind\`, \`tags\`, \`paths\`, \`related_specs\`, \`related_changes\`, \`supersedes\`, and \`last_verified_at\`.
 
 ## Entries
 

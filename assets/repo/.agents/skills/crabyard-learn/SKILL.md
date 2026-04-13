@@ -81,7 +81,7 @@ Write or update exactly one primary artifact.
 
 - Prefer updating an existing focused doc over creating sibling duplicates.
 - Keep filenames stable when updating.
-- Use structured frontmatter from `references/entry-templates.md` when it improves retrieval.
+- Use structured frontmatter from `references/entry-templates.md` when it improves retrieval. Preferred optional fields are `kind`, `tags`, `paths`, `related_specs`, `related_changes`, `supersedes`, and `last_verified_at`.
 - Keep sections compact and concrete.
 
 ### Phase 5: Update the knowledge index
