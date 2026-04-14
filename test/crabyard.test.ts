@@ -69,6 +69,18 @@ test("cli color helpers respect FORCE_COLOR and NO_COLOR", () => {
   }
 });
 
+test("version command prints the installed version", async () => {
+  const repoPath = await mkdtemp(join(tmpdir(), "crabyard-version-"));
+
+  const commandResult = await run(repoPath, ["version"]);
+  assert.equal(commandResult.code, 0, commandResult.stderr);
+  assert.equal(commandResult.stdout, "2026.4.13-1");
+
+  const flagResult = await run(repoPath, ["--version"]);
+  assert.equal(flagResult.code, 0, flagResult.stderr);
+  assert.equal(flagResult.stdout, "2026.4.13-1");
+});
+
 test("unknown depends_on fails validation", async () => {
   const repoPath = await createInitializedRepo();
   await writeChange(repoPath, "bad-dependency", {

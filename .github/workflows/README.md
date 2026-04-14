@@ -16,7 +16,7 @@
 
 Expected flow:
 
-1. Set the release version in `package.json` and `src/shared.ts`, for example `2026.4.1` or `2026.4.1-1` (same-day follow-up release).
+1. Set the release version in `package.json` and `src/shared.ts`, for example `2026.4.1`, `2026.4.1-1` (same-day follow-up release), or `2026.4.1-beta.1`.
 2. Run `pnpm run release:check`.
 3. Commit the release version.
 4. Push a matching tag such as `v2026.4.1` or `v2026.4.1-1` on the current `main` HEAD commit.
@@ -24,7 +24,8 @@ Expected flow:
 
 For multiple releases on the same day, increment the suffix (`-1`, `-2`, `-3`) in both
 `package.json` and `src/shared.ts`, then tag with the same suffixed form.
-Suffixed releases publish to npm under the `next` dist-tag. Unsuffixed releases publish under `latest`.
+Numeric follow-up releases such as `2026.4.13-1` publish under `latest`.
+Only `-beta` releases such as `2026.4.13-beta.1` publish under the `next` dist-tag.
 
 Before the first real publish, configure npm trusted publishing for this repository on npmjs.com.
 

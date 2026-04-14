@@ -86,7 +86,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "$VERSION" == *-* ]]; then
+          if [[ "$VERSION" =~ -beta([.-]|$) ]]; then
             NPM_DIST_TAG="next"
           else
             NPM_DIST_TAG="latest"

@@ -20,6 +20,7 @@ import {
   ListTarget,
   MANIFEST_FILE,
   PACKAGE_NAME,
+  PACKAGE_VERSION,
   PRIMARY_AGENTS_BLOCK,
   PRODUCT_NAME,
   PROJECT_FILE,
@@ -379,6 +380,11 @@ async function dispatch(argv: string[], io: CliIO) {
     return;
   }
 
+  if (command === "--version" || command === "-v" || command === "version") {
+    io.stdout(PACKAGE_VERSION);
+    return;
+  }
+
   switch (command) {
     case "init":
     case "install":
@@ -433,6 +439,7 @@ Usage:
   ${PACKAGE_NAME} <command> [options]
 
 Commands:
+  version                                  Print the installed Crabyard version
   init [repo-path] [options]               Bootstrap Crabyard into a repo
   install [repo-path] [options]            Alias for init
   update [repo-path] [options]             Refresh replace-safe Crabyard assets
