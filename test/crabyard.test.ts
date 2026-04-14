@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/crabyard.js";
-import { formatCliLabelValue, formatCliText } from "../src/shared.js";
+import { PACKAGE_VERSION, formatCliLabelValue, formatCliText } from "../src/shared.js";
 
 type CliResult = {
   code: number;
@@ -74,11 +74,11 @@ test("version command prints the installed version", async () => {
 
   const commandResult = await run(repoPath, ["version"]);
   assert.equal(commandResult.code, 0, commandResult.stderr);
-  assert.equal(commandResult.stdout, "2026.4.13-1");
+  assert.equal(commandResult.stdout, PACKAGE_VERSION);
 
   const flagResult = await run(repoPath, ["--version"]);
   assert.equal(flagResult.code, 0, flagResult.stderr);
-  assert.equal(flagResult.stdout, "2026.4.13-1");
+  assert.equal(flagResult.stdout, PACKAGE_VERSION);
 });
 
 test("unknown depends_on fails validation", async () => {
