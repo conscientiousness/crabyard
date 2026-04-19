@@ -1,6 +1,6 @@
 ---
 name: crabyard-apply
-description: Apply a planned Crabyard change using `execution.yaml` as the scheduling source of truth. Default to serial execution. Parallelize only when ready units are independently verifiable and have disjoint `writes`. Use only when the user explicitly invokes `/crabyard:apply` or asks for the Crabyard apply workflow.
+description: Apply a planned Crabyard change using `execution.yaml` as the scheduling source of truth. Default to serial execution. Parallelize only when ready units are independently verifiable and have disjoint `writes`. Use only when the user explicitly invokes `crabyard-apply` or asks for the Crabyard apply workflow.
 ---
 
 Apply a planned Crabyard change by implementing its bundle safely and keeping scheduling truth aligned with integrated progress.

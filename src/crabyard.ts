@@ -3423,7 +3423,10 @@ ${toBulletList(tags.map((tag) => `\`${tag}\``))}
 - Prefer \`${routes.changeSpecsRoot}/\` for in-flight accepted-truth edits that still need sync.
 - Prefer \`${routes.knowledgeRoot}/\` for durable debugging, implementation, and operations notes.
 - Run a knowledge retrieval pass before major decisions in explore, plan, and review.
-- Use the workflow \`${routes.workflow.join(" -> ")}\`.
+- Prefer the core workflow \`${routes.workflow.join(" -> ")}\`.
+- Use review as an optional gate before apply or closure when risk, ambiguity, or findings warrant it.
+- Run sync and re-verify only when staged specs change accepted truth.
+- Use learn/refresh only when durable knowledge should change.
 - Treat \`${routes.instructionsFile}\` as the canonical repo-instruction file.
 - Update this file only for stable repo-wide context, not task-by-task status.
 `;
@@ -3446,7 +3449,7 @@ function buildManagedManifestData(rootDir: string, primaryDocs: string[], tags: 
       canonical_root: REPO_SKILLS_DIR,
     },
     source_docs: primaryDocs,
-    workflow: ["research", "explore", "plan", "review", "apply", "review", "verify", "sync", "verify", "archive", "learn", "refresh"],
+    workflow: ["explore", "plan", "apply", "verify", "archive"],
     refresh_scope: [`${rootDir}/knowledge`],
     write_policy: {
       forbid_paths: ["CLAUDE.md"],
@@ -3458,6 +3461,9 @@ function buildManagedManifestData(rootDir: string, primaryDocs: string[], tags: 
       `Keep in-flight accepted-truth edits in ${rootDir}/changes/<slug>/specs.`,
       `Keep durable implementation and debugging notes in ${rootDir}/knowledge.`,
       `Use retrieval from ${rootDir}/knowledge before major decisions in explore, plan, and review.`,
+      `Use review as an optional gate before apply or closure when risk, ambiguity, or findings warrant it.`,
+      `Run sync and re-verify only when staged specs change accepted truth.`,
+      `Use learn/refresh only when durable knowledge should change.`,
       `Treat ${INSTRUCTIONS_FILE} as the canonical repo-instruction file.`,
     ],
   };
@@ -3551,7 +3557,10 @@ function buildAgentsBlock(routes: {
 - Keep durable debugging, implementation, and operations notes in \`${routes.knowledgeRoot}/\`.
 - Use repo-local skills from \`${routes.repoSkillsRoot}/\` only.
 - Run a knowledge retrieval pass before major decisions in explore, plan, and review.
-- Prefer the workflow \`${routes.workflow.join(" -> ")}\`.
+- Prefer the core workflow \`${routes.workflow.join(" -> ")}\`.
+- Use review as an optional gate before apply or closure when risk, ambiguity, or findings warrant it.
+- Run sync and re-verify only when staged specs change accepted truth.
+- Use learn/refresh only when durable knowledge should change.
 - Update \`${routes.knowledgeRoot}/index.md\` whenever a knowledge note is created, consolidated, replaced, or removed.
 - Do not mirror accepted product truth into knowledge notes.
 `;

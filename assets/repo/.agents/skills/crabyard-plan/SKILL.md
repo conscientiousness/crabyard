@@ -1,6 +1,6 @@
 ---
 name: crabyard-plan
-description: Plan a complete Crabyard change bundle with an explicit execution graph. Use only when the user explicitly invokes `/crabyard:plan` or asks for the Crabyard plan workflow.
+description: Plan a complete Crabyard change bundle with an explicit execution graph. Use only when the user explicitly invokes `crabyard-plan` or asks for the Crabyard plan workflow.
 ---
 
 Plan a complete Crabyard change bundle so implementation can start immediately.

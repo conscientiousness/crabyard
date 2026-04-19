@@ -1,6 +1,6 @@
 ---
 name: crabyard-archive
-description: Close a Crabyard change after review, verify, sync, and archive readiness are all satisfied. Use only when the user explicitly invokes `/crabyard:archive` or asks for the Crabyard archive workflow.
+description: Close a Crabyard change after review, verify, sync, and archive readiness are all satisfied. Use only when the user explicitly invokes `crabyard-archive` or asks for the Crabyard archive workflow.
 ---
 
 Archive a completed Crabyard change once implementation and accepted truth are in sync.

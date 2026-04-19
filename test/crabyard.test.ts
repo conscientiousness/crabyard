@@ -655,7 +655,7 @@ custom_field: keep-me
   assert.match(agentsContent, /Keep in-flight accepted-truth edits in `custom-yard\/changes-v2\/<slug>\/specs\/`\./);
   assert.match(agentsContent, /Keep durable debugging, implementation, and operations notes in `custom-yard\/knowledge-base\/`\./);
   assert.match(agentsContent, /Use repo-local skills from `\.agents\/custom-skills\/` only\./);
-  assert.match(agentsContent, /Prefer the workflow `inspect -> implement -> verify`\./);
+  assert.match(agentsContent, /Prefer the core workflow `inspect -> implement -> verify`\./);
 });
 
 test("update restores missing repo-authored scaffold files without overwriting existing ones", async () => {
@@ -1121,10 +1121,10 @@ test("explore, plan, and review skills embed retrieval before deeper work", asyn
   assert.match(exploreSkill, /retrieval pass/i);
   assert.match(exploreSkill, /strongest 1-3 prior learnings/i);
   assert.doesNotMatch(exploreSkill, /next verb/i);
-  assert.match(exploreSkill, /next step in the workflow/i);
+  assert.match(exploreSkill, /next move in the two-layer model/i);
   assert.match(planSkill, /repo-local `crabyard-research` skill/i);
   assert.match(reviewSkill, /retrieved knowledge/i);
-  assert.match(manifest, /\nworkflow:\n  - research\n/);
+  assert.match(manifest, /\nworkflow:\n  - explore\n  - plan\n  - apply\n  - verify\n  - archive\n/);
 });
 
 async function createInitializedRepo() {

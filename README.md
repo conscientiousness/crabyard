@@ -129,7 +129,12 @@ agent reads proposal/design/tasks/execution
 agent implements one safe unit at a time
      |
      v
-verify -> sync -> verify -> archive
+verify
+     |
+     +--> if staged specs changed: sync -> re-verify
+     |
+     v
+archive
      |
      v
 repo stays coherent for the next session
@@ -150,11 +155,18 @@ Crabyard was influenced by projects like Compound Engineering and OpenSpec. The 
 
 ## Workflow
 
-The workflow is short on purpose. It is meant to be easy to remember and easy to re-enter after context has gone stale.
+The workflow uses a two-layer model on purpose: keep the core loop short, and treat the rest as conditional helpers.
 
 ```text
-research -> explore -> plan -> review -> apply -> review -> verify -> sync -> verify -> archive -> learn/refresh
+explore -> plan -> apply -> verify -> archive
 ```
+
+Conditional helpers:
+
+- run knowledge retrieval before major decisions in explore, plan, and review
+- use review as an optional gate before apply or before closure when risk, ambiguity, or findings warrant it
+- run `sync` and re-verify only when staged specs change accepted truth
+- use `learn` or `refresh` only when durable knowledge should change
 
 - `AGENTS.md` is the canonical repo-instruction file.
 - accepted truth lives in `crabyard/specs/`
