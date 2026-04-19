@@ -63,13 +63,13 @@ crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
 ```
 
-CLI 升級後，如果要把既有 repo 中可安全替換的 managed assets 更新到最新版，可以執行：
+CLI 升級後，如果要把既有 repo 中的 repo-local managed assets 更新到最新版，可以執行：
 
 ```bash
-crabyard update /absolute/path/to/repo
+crabyard refresh .
 ```
 
-`update` 會刷新像 repo-local skills 與 `AGENTS.md` managed routing block 這類可安全替換的資產；`project.md`、`knowledge/index.md`、`TASK_EXECUTION_FORMAT.md`、各 bucket 的 `README.md` 這些 repo 自己會持續維護的文件會被保留，只有缺檔時才補回。
+`refresh` 會刷新像 repo-local skills 與 `AGENTS.md` managed routing block 這類可安全替換的資產，並把目前安裝的 CLI 版本寫進 `crabyard/manifest.yaml` 的 `managed_by.crabyard_version`。`project.md`、`knowledge/index.md`、`TASK_EXECUTION_FORMAT.md`、各 bucket 的 `README.md` 這些 repo 自己會持續維護的文件會被保留，只有缺檔時才補回。舊的 `update` 指令仍保留為 alias。
 
 只有在你真的想把被取代的 managed files 複製到 `.crabyard/backups/` 時，才加上 `--backup`。
 
@@ -302,7 +302,8 @@ Agent:
 
 - `init`：在專案裡建立 Crabyard 所需的基礎結構
 - `install`：`init` 的別名
-- `update`：更新既有 repo 中可安全替換的 managed assets，同時保留 repo 自己維護的文件
+- `refresh`：更新既有 repo 中可安全替換的 managed assets，同時保留 repo 自己維護的文件
+- `update`：`refresh` 的別名
 - `migrate`：把 OpenSpec 的 spec 與 change bundle 複製進 Crabyard
 - `list`：列出專案裡目前有哪些變更
 - `show`：把單一變更包的內容印出來查看
@@ -314,6 +315,14 @@ Agent:
 - `lint`：目前支援 `lint knowledge`，用來檢查編譯後的知識層
 - `sync`：把已接受規格的更新同步到正式規格
 - `archive`：把已驗證且同步一致的變更正式結案
+
+### `validate [repo]`
+
+`validate` 會在工作繼續前，先檢查整個 repo 或單一 change bundle 是否結構正確。
+
+- 不帶額外 target 的 `validate` 會檢查 repo 結構、managed memory block，以及所有進行中的 changes
+- `validate change <name>` 會只檢查單一 change bundle
+- 文字與 JSON 輸出現在都會包含 managed-assets version 狀態，方便在驗證時直接看到 repo-local skills 或 routing assets 是否落後於目前安裝的 CLI
 
 ### `check <change>`
 
@@ -335,8 +344,9 @@ Agent:
 
 - `status` 不帶 change 時，會摘要專案是否有效、各種計數，以及進行中變更的狀態
 - `status <change>` 會摘要任務完成度、可開始的單元、被阻擋的單元、驗證缺口、同步準備狀態，以及目前可執行範圍
+- `status` 也會回報 repo-managed assets 是否和目前安裝的 CLI 版本一致；不一致時會直接給 refresh 提示
 - `--json` 會回傳適合 agent 工具鏈使用的機器可讀輸出
-- `status --json` 目前包含 `frontier.readyUnits`、`frontier.blockedUnits` 與 `verification.summary`
+- `status --json` 目前包含 `managedAssets`、`frontier.readyUnits`、`frontier.blockedUnits` 與 `verification.summary`
 
 範例：
 
@@ -346,6 +356,7 @@ crabyard status add-auth --repo /absolute/path/to/repo --json
 
 典型 JSON 欄位：
 
+- `managedAssets`
 - `state`
 - `units.items`
 - `frontier.readyUnits`

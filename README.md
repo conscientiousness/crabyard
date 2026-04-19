@@ -63,13 +63,13 @@ crabyard sync add-auth --repo /absolute/path/to/repo
 crabyard archive add-auth --repo /absolute/path/to/repo
 ```
 
-After upgrading the CLI, refresh the replace-safe managed assets in an existing repo with:
+After upgrading the CLI, refresh the repo-local managed assets in an existing repo with:
 
 ```bash
-crabyard update /absolute/path/to/repo
+crabyard refresh .
 ```
 
-`update` refreshes replace-safe assets such as repo-local skills and the managed `AGENTS.md` routing block. It preserves repo-authored docs like `project.md`, `knowledge/index.md`, `TASK_EXECUTION_FORMAT.md`, and bucket `README.md` files, only recreating them when missing.
+`refresh` updates replace-safe assets such as repo-local skills and the managed `AGENTS.md` routing block, and records the installed CLI version in `crabyard/manifest.yaml` under `managed_by.crabyard_version`. It preserves repo-authored docs like `project.md`, `knowledge/index.md`, `TASK_EXECUTION_FORMAT.md`, and bucket `README.md` files, only recreating them when missing. The legacy `update` command remains available as an alias.
 
 Add `--backup` only if you want replaced managed files copied into `.crabyard/backups/` before refresh.
 
@@ -302,7 +302,8 @@ Agent:
 
 - `init`: set up Crabyard files in a repo
 - `install`: alias for `init`
-- `update`: refresh replace-safe managed assets in an existing repo while preserving repo-authored docs
+- `refresh`: refresh replace-safe managed assets in an existing repo while preserving repo-authored docs
+- `update`: alias for `refresh`
 - `migrate`: copy OpenSpec specs and change bundles into Crabyard
 - `list`: show available changes in the repo
 - `show`: print one change bundle for inspection
@@ -314,6 +315,14 @@ Agent:
 - `lint`: currently supports `lint knowledge` for the compiled knowledge layer
 - `sync`: copy accepted-spec updates into canonical specs
 - `archive`: close a verified, sync-coherent change
+
+### `validate [repo]`
+
+`validate` checks the repo or one change bundle before work continues.
+
+- `validate` with no extra target validates the repo structure, managed memory block, and active changes
+- `validate change <name>` validates one change bundle
+- both text and JSON output now include managed-asset version status, so stale repo-local skills or routing assets are visible during validation
 
 ### `check <change>`
 
@@ -333,8 +342,9 @@ This is usually the command an agent reads the most. It is also read-only.
 
 - `status` with no change summarizes repo validity, counts, and active change states
 - `status <change>` summarizes task completion, ready units, blocked units, verification gaps, sync readiness, and the current execution frontier
+- `status` also reports whether repo-managed assets match the installed CLI version, with a refresh hint when they do not
 - `--json` returns machine-readable status for agent tooling
-- `status --json` now includes `frontier.readyUnits`, `frontier.blockedUnits`, and `verification.summary`
+- `status --json` now includes `managedAssets`, `frontier.readyUnits`, `frontier.blockedUnits`, and `verification.summary`
 
 Example:
 
@@ -344,6 +354,7 @@ crabyard status add-auth --repo /absolute/path/to/repo --json
 
 Typical JSON fields:
 
+- `managedAssets`
 - `state`
 - `units.items`
 - `frontier.readyUnits`

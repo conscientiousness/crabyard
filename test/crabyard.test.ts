@@ -515,6 +515,8 @@ test("init creates the expected structure", async () => {
   await assertPathExists(join(repoPath, ".agents", "skills", "crabyard-refresh", "SKILL.md"));
   await assertPathMissing(join(repoPath, ".codex", "skills", "crabyard-research", "SKILL.md"));
   await assertPathMissing(join(repoPath, ".codex", "skills", "crabyard-review", "SKILL.md"));
+  const manifest = await readFile(join(repoPath, "crabyard", "manifest.yaml"), "utf8");
+  assert.match(manifest, new RegExp(`managed_by:\\n  crabyard_version: ${escapeRegex(PACKAGE_VERSION)}\\n`));
 });
 
 test("init rejects removed global compatibility flags", async () => {
@@ -552,7 +554,7 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
 
   const updateResult = await run(repoPath, ["update", repoPath]);
   assert.equal(updateResult.code, 0, updateResult.stderr);
-  assert.match(updateResult.stdout, /Update complete\./);
+  assert.match(updateResult.stdout, /Refresh complete\./);
 
   const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
   assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
@@ -567,8 +569,22 @@ test("update refreshes managed repo assets and preserves manifest metadata", asy
   assert.equal(await pathExistsOnDisk(join(repoPath, ".crabyard", "backups")), false);
 
   const manifest = await readFile(join(repoPath, "crabyard", "manifest.yaml"), "utf8");
+  assert.match(manifest, new RegExp(`managed_by:\\n  crabyard_version: ${escapeRegex(PACKAGE_VERSION)}\\n`));
   assert.match(manifest, /source_docs:\n  - README\.md\n  - docs\/guide\.md\n/);
   assert.match(manifest, /default_tags:\n  - alpha\n  - beta\n/);
+});
+
+test("refresh aliases update for managed asset refresh", async () => {
+  const repoPath = await createInitializedRepo();
+  const targetSkillPath = join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md");
+  await writeFile(targetSkillPath, "# stale template\n", "utf8");
+
+  const result = await run(repoPath, ["refresh", repoPath]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Refresh complete\./);
+
+  const expectedSkill = await readFile(new URL("../assets/repo/.agents/skills/crabyard-apply/SKILL.md", import.meta.url), "utf8");
+  assert.equal(await readFile(targetSkillPath, "utf8"), expectedSkill);
 });
 
 test("update preserves custom manifest fields and custom managed paths", async () => {
@@ -590,6 +606,8 @@ knowledge:
   index: custom-yard/knowledge-base/index.md
 skills:
   canonical_root: .agents/custom-skills
+managed_by:
+  custom_field: keep-me
 source_docs:
   - README.md
 workflow:
@@ -623,6 +641,7 @@ custom_field: keep-me
   assert.match(updatedManifest, /root: custom-yard\/knowledge-base/);
   assert.match(updatedManifest, /index: custom-yard\/knowledge-base\/index\.md/);
   assert.match(updatedManifest, /canonical_root: \.agents\/custom-skills/);
+  assert.match(updatedManifest, new RegExp(`managed_by:\\n  custom_field: keep-me\\n  crabyard_version: ${escapeRegex(PACKAGE_VERSION)}\\n`));
   assert.match(updatedManifest, /custom_field: keep-me/);
   assert.match(updatedManifest, /workflow:\n  - inspect\n  - implement\n  - verify\n/);
   assert.match(updatedManifest, /refresh_scope:\n  - custom-yard\/knowledge-base\n/);
@@ -681,7 +700,7 @@ test("update rejects --skip-repo", async () => {
   const result = await run(repoPath, ["update", repoPath, "--skip-repo"]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /does not support --skip-repo/i);
+  assert.match(result.stderr, /refresh command does not support --skip-repo/i);
 });
 
 test("update replaces managed assets idempotently instead of appending", async () => {
@@ -891,6 +910,8 @@ units:
   const status = parseJson(result.stdout);
 
   assert.equal(status.kind, "change-status");
+  assert.equal(status.managedAssets.state, "current");
+  assert.equal(status.managedAssets.installedVersion, PACKAGE_VERSION);
   assert.equal(status.state, "in-progress");
   assert.equal(status.units.ready, 1);
   assert.equal(status.units.blocked, 1);
@@ -912,6 +933,48 @@ units:
       { id: "T3", ready: false, blockedBy: ["T2"] },
     ],
   );
+});
+
+test("status and validate surface managed asset version mismatches", async () => {
+  const repoPath = await createInitializedRepo();
+  const manifestPath = join(repoPath, "crabyard", "manifest.yaml");
+  const manifest = await readFile(manifestPath, "utf8");
+  await writeFile(
+    manifestPath,
+    manifest.replace(`crabyard_version: ${PACKAGE_VERSION}`, "crabyard_version: 2026.4.14"),
+    "utf8",
+  );
+
+  const statusResult = await run(repoPath, ["status", "--repo", repoPath]);
+  assert.equal(statusResult.code, 0, statusResult.stderr);
+  assert.match(statusResult.stdout, new RegExp(`Managed Assets: repo 2026\\.4\\.14; installed CLI ${escapeRegex(PACKAGE_VERSION)}`));
+  assert.match(statusResult.stdout, /Run `crabyard refresh <repo>` to sync this repo\./);
+
+  const validateResult = await run(repoPath, ["validate", "--repo", repoPath, "--json"]);
+  assert.equal(validateResult.code, 0, validateResult.stderr);
+  const payload = parseJson(validateResult.stdout);
+  assert.equal(payload.managedAssets.state, "stale");
+  assert.equal(payload.managedAssets.repoVersion, "2026.4.14");
+  assert.match(payload.managedAssets.hint, /refresh <repo>/i);
+});
+
+test("refresh surfaces managed asset mismatches before syncing the repo", async () => {
+  const repoPath = await createInitializedRepo();
+  const manifestPath = join(repoPath, "crabyard", "manifest.yaml");
+  const manifest = await readFile(manifestPath, "utf8");
+  await writeFile(
+    manifestPath,
+    manifest.replace(`crabyard_version: ${PACKAGE_VERSION}`, "crabyard_version: 2026.4.14"),
+    "utf8",
+  );
+
+  const result = await run(repoPath, ["refresh", repoPath]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`Managed Assets: repo 2026\\.4\\.14; installed CLI ${escapeRegex(PACKAGE_VERSION)}`));
+  assert.match(result.stdout, /Refresh complete\./);
+
+  const refreshedManifest = await readFile(manifestPath, "utf8");
+  assert.match(refreshedManifest, new RegExp(`crabyard_version: ${escapeRegex(PACKAGE_VERSION)}`));
 });
 
 test("status transitions from ready-to-sync to ready-to-archive", async () => {
@@ -1240,6 +1303,10 @@ async function run(cwd: string, args: string[]): Promise<CliResult> {
 
 function parseJson(value: string) {
   return JSON.parse(value) as any;
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function assertPathExists(targetPath: string) {

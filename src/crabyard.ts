@@ -85,6 +85,12 @@ const manifestSchema = z
       })
       .passthrough()
       .optional(),
+    managed_by: z
+      .object({
+        crabyard_version: z.string().trim().min(1).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -180,9 +186,18 @@ type BlockedUnitFrontier = {
   blockedBy: string[];
 };
 
+type ManagedAssetsStatus = {
+  installedVersion: string;
+  repoVersion: string | null;
+  state: "current" | "stale" | "ahead" | "untracked";
+  mismatch: boolean;
+  hint: string | null;
+};
+
 type ChangeStatusReport = {
   kind: "change-status";
   repoPath: string;
+  managedAssets: ManagedAssetsStatus;
   change: {
     name: string;
     path: string;
@@ -237,6 +252,7 @@ type ChangeStatusReport = {
 type RepoStatusReport = {
   kind: "repo-status";
   repoPath: string;
+  managedAssets: ManagedAssetsStatus;
   validation: {
     valid: boolean;
     errors: string[];
@@ -390,8 +406,9 @@ async function dispatch(argv: string[], io: CliIO) {
     case "install":
       await runInit(rest, io);
       return;
+    case "refresh":
     case "update":
-      await runUpdate(rest, io);
+      await runRefresh(rest, io);
       return;
     case "migrate":
       await runMigrate(rest, io);
@@ -442,7 +459,8 @@ Commands:
   version                                  Print the installed Crabyard version
   init [repo-path] [options]               Bootstrap Crabyard into a repo
   install [repo-path] [options]            Alias for init
-  update [repo-path] [options]             Refresh replace-safe Crabyard assets
+  refresh [repo-path] [options]            Refresh repo-local Crabyard managed assets
+  update [repo-path] [options]             Alias for refresh
   migrate openspec [repo-path] [options]   Copy OpenSpec artifacts into Crabyard
   list [all|specs|changes|knowledge]       List tracked repo artifacts
   show <target> [name]                     Show manifest, project, spec, change, or knowledge
@@ -466,7 +484,7 @@ Targets for show:
 
 Examples:
   pnpm exec tsx src/index.ts init /absolute/path/to/repo
-  pnpm exec tsx src/index.ts update /absolute/path/to/repo
+  pnpm exec tsx src/index.ts refresh /absolute/path/to/repo
   pnpm exec tsx src/index.ts migrate openspec /absolute/path/to/repo
   node dist/index.js list specs --repo /absolute/path/to/repo
   node dist/index.js check add-auth --repo /absolute/path/to/repo
@@ -483,11 +501,13 @@ Init options:
   --backup
   --dry-run
 
-Update options:
+Refresh options:
   --primary-docs <comma-separated-paths>
   --tags <comma-separated-tags>
   --backup
   --dry-run
+
+The legacy \`update\` alias accepts the same options.
 
 Migrate options:
   --backup
@@ -505,8 +525,8 @@ async function runInit(args: string[], io: CliIO) {
   await runRepoAssetCommand("init", args, io);
 }
 
-async function runUpdate(args: string[], io: CliIO) {
-  await runRepoAssetCommand("update", args, io);
+async function runRefresh(args: string[], io: CliIO) {
+  await runRepoAssetCommand("refresh", args, io);
 }
 
 async function runMigrate(args: string[], io: CliIO) {
@@ -572,15 +592,15 @@ async function runMigrate(args: string[], io: CliIO) {
   io.stdout(formatCliText("Migration complete.", "success"));
 }
 
-async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: CliIO) {
+async function runRepoAssetCommand(mode: "init" | "refresh", args: string[], io: CliIO) {
   const options = parseInstallArgs(args, io.cwd);
-  if (mode === "update" && options.skipRepo) {
-    throw new Error("The update command does not support --skip-repo.");
+  if (mode === "refresh" && options.skipRepo) {
+    throw new Error("The refresh command does not support --skip-repo. The legacy `update` alias does not support it either.");
   }
 
   const repoPath = resolve(options.repoPath);
   const repoName = basename(repoPath);
-  const existingMetadata = mode === "update" ? await readRepoInstallMetadata(repoPath) : null;
+  const existingMetadata = mode === "refresh" ? await readRepoInstallMetadata(repoPath) : null;
   const primaryDocs =
     options.primaryDocs.length > 0
       ? options.primaryDocs
@@ -594,11 +614,15 @@ async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: 
         ? existingMetadata!.tags
         : [toKebabCase(repoName)];
   const timestamp = createTimestamp();
+  const managedAssetsBefore = mode === "refresh" ? buildManagedAssetsStatus(existingMetadata?.managedVersion ?? null) : null;
 
-  io.stdout(formatCliText(mode === "init" ? `Initializing ${PRODUCT_NAME}` : `Updating ${PRODUCT_NAME}`, "heading"));
+  io.stdout(formatCliText(mode === "init" ? `Initializing ${PRODUCT_NAME}` : `Refreshing ${PRODUCT_NAME}`, "heading"));
   io.stdout(formatCliLabelValue("Repo", repoPath));
   io.stdout(formatCliLabelValue("Source docs", primaryDocs.join(", ")));
   io.stdout(formatCliLabelValue("Tags", tags.join(", ")));
+  if (managedAssetsBefore?.mismatch) {
+    printManagedAssetsStatus(io, managedAssetsBefore);
+  }
 
   if (!options.skipRepo) {
     await installRepoAssets({
@@ -613,7 +637,14 @@ async function runRepoAssetCommand(mode: "init" | "update", args: string[], io: 
     });
   }
 
-  io.stdout(formatCliText(mode === "init" ? "Init complete." : "Update complete.", "success"));
+  if (mode === "refresh") {
+    const managedAssetsAfter = options.dryRun ? managedAssetsBefore : buildManagedAssetsStatus(PACKAGE_VERSION);
+    if (managedAssetsAfter) {
+      printManagedAssetsStatus(io, managedAssetsAfter);
+    }
+  }
+
+  io.stdout(formatCliText(mode === "init" ? "Init complete." : "Refresh complete.", "success"));
 }
 
 async function runList(args: string[], io: CliIO) {
@@ -708,6 +739,7 @@ async function runShow(args: string[], io: CliIO) {
 async function runValidate(args: string[], io: CliIO) {
   const { repoPath, json, args: positional } = parseCommonFlags(args, io.cwd);
   const context = await loadRepoContext(repoPath);
+  const managedAssets = await readManagedAssetsStatus(context.repoPath);
 
   if (positional.length === 0 || (positional.length === 1 && positional[0] === "repo")) {
     const errors = await validateRepo(context);
@@ -716,9 +748,12 @@ async function runValidate(args: string[], io: CliIO) {
         printJson(io, {
           kind: "validate-repo",
           repoPath: context.repoPath,
+          managedAssets,
           valid: false,
           errors,
         });
+      } else {
+        printManagedAssetsStatus(io, managedAssets);
       }
       throw new Error(formatValidationErrors("Repo validation failed.", errors));
     }
@@ -726,12 +761,14 @@ async function runValidate(args: string[], io: CliIO) {
       printJson(io, {
         kind: "validate-repo",
         repoPath: context.repoPath,
+        managedAssets,
         valid: true,
         errors: [],
       });
       return;
     }
     io.stdout("Repo validation passed.");
+    printManagedAssetsStatus(io, managedAssets);
     return;
   }
 
@@ -744,9 +781,12 @@ async function runValidate(args: string[], io: CliIO) {
           kind: "validate-change",
           repoPath: context.repoPath,
           change: basename(changeDir),
+          managedAssets,
           valid: false,
           errors: result.errors,
         });
+      } else {
+        printManagedAssetsStatus(io, managedAssets);
       }
       throw new Error(formatValidationErrors(`Change ${basename(changeDir)} validation failed.`, result.errors));
     }
@@ -755,12 +795,14 @@ async function runValidate(args: string[], io: CliIO) {
         kind: "validate-change",
         repoPath: context.repoPath,
         change: basename(changeDir),
+        managedAssets,
         valid: true,
         errors: [],
       });
       return;
     }
     io.stdout(`Change ${basename(changeDir)} validation passed.`);
+    printManagedAssetsStatus(io, managedAssets);
     return;
   }
 
@@ -1238,7 +1280,7 @@ async function detectPrimaryDocs(repoPath: string): Promise<string[]> {
   return result.length > 0 ? result : ["README.md"];
 }
 
-async function readRepoInstallMetadata(repoPath: string): Promise<{ primaryDocs: string[]; tags: string[] } | null> {
+async function readRepoInstallMetadata(repoPath: string): Promise<{ primaryDocs: string[]; tags: string[]; managedVersion: string | null } | null> {
   const manifestPath = join(repoPath, ROOT_DIRNAME, MANIFEST_FILE);
   if (!(await pathExists(manifestPath))) {
     return null;
@@ -1257,6 +1299,7 @@ async function readRepoInstallMetadata(repoPath: string): Promise<{ primaryDocs:
   return {
     primaryDocs: parsed.data.source_docs ?? [],
     tags: parsed.data.default_tags ?? [],
+    managedVersion: parsed.data.managed_by?.crabyard_version ?? null,
   };
 }
 
@@ -1318,7 +1361,7 @@ async function installRepoAssets(args: {
   backup: boolean;
   dryRun: boolean;
   timestamp: string;
-  mode: "init" | "update";
+  mode: "init" | "refresh";
   io: CliIO;
 }) {
   const backupRoot = join(args.repoPath, BACKUP_DIRNAME, "backups", args.timestamp);
@@ -2012,7 +2055,8 @@ async function printChangeBundle(changeDir: string, repoPath: string, io: CliIO,
 }
 
 async function buildRepoStatus(context: RepoContext): Promise<RepoStatusReport> {
-  const [validationErrors, specs, knowledge, activeChanges, archivedChanges] = await Promise.all([
+  const [managedAssets, validationErrors, specs, knowledge, activeChanges, archivedChanges] = await Promise.all([
+    readManagedAssetsStatus(context.repoPath),
     validateRepo(context),
     listSpecEntries(context),
     listKnowledgeEntries(context),
@@ -2020,11 +2064,12 @@ async function buildRepoStatus(context: RepoContext): Promise<RepoStatusReport> 
     listArchivedChangeEntries(context),
   ]);
 
-  const activeChangeReports = await Promise.all(activeChanges.map((changeName) => buildChangeStatus(context, changeName)));
+  const activeChangeReports = await Promise.all(activeChanges.map((changeName) => buildChangeStatus(context, changeName, managedAssets)));
 
   return {
     kind: "repo-status",
     repoPath: context.repoPath,
+    managedAssets,
     validation: {
       valid: validationErrors.length === 0,
       errors: validationErrors,
@@ -2045,7 +2090,12 @@ async function buildRepoStatus(context: RepoContext): Promise<RepoStatusReport> 
   };
 }
 
-async function buildChangeStatus(context: RepoContext, changeName: string): Promise<ChangeStatusReport> {
+async function buildChangeStatus(
+  context: RepoContext,
+  changeName: string,
+  managedAssets?: ManagedAssetsStatus,
+): Promise<ChangeStatusReport> {
+  const managedAssetStatus = managedAssets ?? (await readManagedAssetsStatus(context.repoPath));
   const changeDir = await findChangeDirectory(context, changeName, true);
   const validation = await validateChangeDirectory(changeDir);
   const taskSections = validation.tasksContent ? parseTaskSections(validation.tasksContent) : [];
@@ -2077,6 +2127,7 @@ async function buildChangeStatus(context: RepoContext, changeName: string): Prom
   return {
     kind: "change-status",
     repoPath: context.repoPath,
+    managedAssets: managedAssetStatus,
     change: {
       name: basename(changeDir),
       path: relative(context.repoPath, changeDir),
@@ -2392,6 +2443,7 @@ function buildUnitStatuses(execution: ParsedExecution | null, taskSections: Task
 
 function printRepoStatus(report: RepoStatusReport, io: CliIO) {
   io.stdout(formatCliLabelValue("Repo", report.repoPath));
+  printManagedAssetsStatus(io, report.managedAssets);
   io.stdout(
     formatCliLabelValue("Validation", report.validation.valid ? "valid" : "invalid", {
       valueTone: report.validation.valid ? "success" : "error",
@@ -2427,6 +2479,7 @@ function printRepoStatus(report: RepoStatusReport, io: CliIO) {
 function printChangeStatus(report: ChangeStatusReport, io: CliIO) {
   io.stdout(formatCliLabelValue("Change", report.change.name));
   io.stdout(formatCliLabelValue("Path", report.change.path));
+  printManagedAssetsStatus(io, report.managedAssets);
   io.stdout(formatCliLabelValue("State", report.state, { valueTone: getChangeStateTone(report.state) }));
   io.stdout(
     formatCliLabelValue(
@@ -3311,6 +3364,10 @@ function mergeManagedManifest(existing: Record<string, unknown>, managed: Return
     existing.write_policy && typeof existing.write_policy === "object" && !Array.isArray(existing.write_policy)
       ? (existing.write_policy as Record<string, unknown>)
       : {};
+  const existingManagedBy =
+    existing.managed_by && typeof existing.managed_by === "object" && !Array.isArray(existing.managed_by)
+      ? (existing.managed_by as Record<string, unknown>)
+      : {};
   const existingWorkflow = readStringArrayField(existing.workflow);
   const existingRefreshScope = readStringArrayField(existing.refresh_scope);
   const existingNotes = readStringArrayField(existing.notes);
@@ -3332,6 +3389,10 @@ function mergeManagedManifest(existing: Record<string, unknown>, managed: Return
     skills: {
       ...existingSkills,
       canonical_root: existingSkills.canonical_root ?? managed.skills.canonical_root,
+    },
+    managed_by: {
+      ...existingManagedBy,
+      crabyard_version: managed.managed_by.crabyard_version,
     },
     source_docs: managed.source_docs,
     workflow: existingWorkflow ?? managed.workflow,
@@ -3448,6 +3509,9 @@ function buildManagedManifestData(rootDir: string, primaryDocs: string[], tags: 
     skills: {
       canonical_root: REPO_SKILLS_DIR,
     },
+    managed_by: {
+      crabyard_version: PACKAGE_VERSION,
+    },
     source_docs: primaryDocs,
     workflow: ["explore", "plan", "apply", "verify", "archive"],
     refresh_scope: [`${rootDir}/knowledge`],
@@ -3471,6 +3535,89 @@ function buildManagedManifestData(rootDir: string, primaryDocs: string[], tags: 
 
 function buildManifest(primaryDocs: string[], tags: string[]): string {
   return stringify(buildManagedManifestData(ROOT_DIRNAME, primaryDocs, tags));
+}
+
+async function readManagedAssetsStatus(repoPath: string): Promise<ManagedAssetsStatus> {
+  const metadata = await readRepoInstallMetadata(repoPath);
+  return buildManagedAssetsStatus(metadata?.managedVersion ?? null);
+}
+
+function buildManagedAssetsStatus(repoVersion: string | null): ManagedAssetsStatus {
+  if (!repoVersion) {
+    return {
+      installedVersion: PACKAGE_VERSION,
+      repoVersion: null,
+      state: "untracked",
+      mismatch: true,
+      hint: "This repo does not record a managed Crabyard version yet. Run `crabyard refresh <repo>` to sync and record it.",
+    };
+  }
+
+  const comparison = compareCrabyardVersions(repoVersion, PACKAGE_VERSION);
+  if (comparison < 0) {
+    return {
+      installedVersion: PACKAGE_VERSION,
+      repoVersion,
+      state: "stale",
+      mismatch: true,
+      hint: "Repo-managed assets are older than the installed CLI. Run `crabyard refresh <repo>` to sync this repo.",
+    };
+  }
+
+  if (comparison > 0) {
+    return {
+      installedVersion: PACKAGE_VERSION,
+      repoVersion,
+      state: "ahead",
+      mismatch: true,
+      hint: "Repo-managed assets are newer than the installed CLI. Upgrade the CLI before refreshing this repo.",
+    };
+  }
+
+  return {
+    installedVersion: PACKAGE_VERSION,
+    repoVersion,
+    state: "current",
+    mismatch: false,
+    hint: null,
+  };
+}
+
+function compareCrabyardVersions(left: string, right: string): number {
+  const leftParts = parseCrabyardVersion(left);
+  const rightParts = parseCrabyardVersion(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference > 0 ? 1 : -1;
+    }
+  }
+
+  return 0;
+}
+
+function parseCrabyardVersion(value: string): number[] {
+  return (value.match(/\d+/g) ?? []).map((entry) => Number.parseInt(entry, 10));
+}
+
+function printManagedAssetsStatus(io: CliIO, status: ManagedAssetsStatus) {
+  io.stdout(
+    formatCliLabelValue(
+      "Managed Assets",
+      `repo ${status.repoVersion ?? "untracked"}; installed CLI ${status.installedVersion}`,
+      { valueTone: status.mismatch ? "warning" : "success" },
+    ),
+  );
+
+  if (status.hint) {
+    io.stdout(
+      formatCliLabelValue("Refresh Hint", status.hint, {
+        valueTone: status.state === "ahead" ? "warning" : "accent",
+      }),
+    );
+  }
 }
 
 function buildBucketReadme(title: string, summary: string): string {
