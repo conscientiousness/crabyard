@@ -1184,10 +1184,38 @@ test("explore, plan, and review skills embed retrieval before deeper work", asyn
   assert.match(exploreSkill, /retrieval pass/i);
   assert.match(exploreSkill, /strongest 1-3 prior learnings/i);
   assert.doesNotMatch(exploreSkill, /next verb/i);
+  assert.match(exploreSkill, /orientation pass/i);
+  assert.match(exploreSkill, /where to start/i);
+  assert.match(exploreSkill, /Do not force a full onboarding-style orientation/i);
   assert.match(exploreSkill, /next move in the two-layer model/i);
   assert.match(planSkill, /repo-local `crabyard-research` skill/i);
+  assert.match(planSkill, /workflow discovery pass/i);
+  assert.match(planSkill, /failure modes and recovery/i);
+  assert.match(planSkill, /handoff contracts/i);
+  assert.match(planSkill, /Do not plan only the happy path/i);
   assert.match(reviewSkill, /retrieved knowledge/i);
+  assert.match(reviewSkill, /scope discipline/i);
+  assert.match(reviewSkill, /task-aware bounded change discipline/i);
+  assert.match(reviewSkill, /workflow inventory/i);
+  assert.match(reviewSkill, /unjustified scope creep/i);
   assert.match(manifest, /\nworkflow:\n  - explore\n  - plan\n  - apply\n  - verify\n  - archive\n/);
+});
+
+test("apply and debug skills enforce bounded change discipline", async () => {
+  const repoPath = await createInitializedRepo();
+  const applySkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-apply", "SKILL.md"), "utf8");
+  const debugSkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-debug", "SKILL.md"), "utf8");
+
+  assert.match(applySkill, /task-aware bounded change discipline/i);
+  assert.match(applySkill, /behavior fix/i);
+  assert.match(applySkill, /internal refactor/i);
+  assert.match(applySkill, /smallest sufficient change without speculative extension points/i);
+  assert.match(applySkill, /Do not apply blanket minimal-diff thinking to refactor or migration tasks/i);
+
+  assert.match(debugSkill, /behavior-fix-first/i);
+  assert.match(debugSkill, /smallest evidence-backed correction/i);
+  assert.match(debugSkill, /Do not use a debug task to smuggle in refactors/i);
+  assert.match(debugSkill, /scope recommendation/i);
 });
 
 async function createInitializedRepo() {

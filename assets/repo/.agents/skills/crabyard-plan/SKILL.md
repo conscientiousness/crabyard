@@ -42,20 +42,35 @@ crabyard/changes/<slug>/
 
 1. Derive or confirm the change slug.
 2. Use the retrieval results to surface prior pitfalls, implementation heuristics, and adjacent specs before writing the bundle.
-3. Reuse an existing matching change directory when safe; otherwise create a new one.
-4. Write `proposal.md`, `design.md`, `tasks.md`, `execution.yaml`, and an empty or staged `specs/` subtree when accepted truth will change.
-5. Keep one top-level `##` section per execution unit in `tasks.md`.
-6. Keep `execution.yaml` exact and trustworthy:
+3. Run a workflow discovery pass before writing `design.md`:
+   - identify the primary workflow or workflows the change affects
+   - identify the main path the implementation must support
+   - identify branch conditions and decision points that materially affect implementation or verification
+   - identify failure modes, recovery paths, and rollback expectations when they matter
+   - identify handoff contracts between modules, systems, agents, or human steps when the change crosses boundaries
+4. Reuse an existing matching change directory when safe; otherwise create a new one.
+5. Write `proposal.md`, `design.md`, `tasks.md`, `execution.yaml`, and an empty or staged `specs/` subtree when accepted truth will change.
+6. In `design.md`, make workflow shape explicit when relevant:
+   - workflow inventory
+   - main path
+   - branches and decision points
+   - failure modes and recovery
+   - handoff contracts
+   - verification implications
+7. Keep one top-level `##` section per execution unit in `tasks.md`.
+8. Keep `execution.yaml` exact and trustworthy:
    - one unit per top-level task section
    - exact section-to-unit order
    - required `id`, `title`, `parallel`, `depends_on`, `writes`, `verify`
    - conservative `parallel: true`
-7. Keep accepted truth updates staged in `crabyard/changes/<slug>/specs/`, not in `crabyard/specs/` yet.
-8. If the retrieved knowledge contradicts older notes or reveals document drift, note a follow-up `crabyard-refresh` scope instead of silently carrying stale assumptions into the plan.
+9. Keep workflow analysis in `design.md`. Do not expand `execution.yaml` beyond the execution graph just to capture workflow prose.
+10. Keep accepted truth updates staged in `crabyard/changes/<slug>/specs/`, not in `crabyard/specs/` yet.
+11. If the retrieved knowledge contradicts older notes or reveals document drift, note a follow-up `crabyard-refresh` scope instead of silently carrying stale assumptions into the plan.
 
 ## Guardrails
 
 - Do not start implementation during the planning stage.
 - Do not create speculative accepted truth.
+- Do not plan only the happy path when branch conditions, failures, or handoffs materially affect the change.
 - Do not omit `execution.yaml`; Crabyard depends on the explicit execution graph.
 - Do not treat knowledge notes as accepted truth when specs disagree.

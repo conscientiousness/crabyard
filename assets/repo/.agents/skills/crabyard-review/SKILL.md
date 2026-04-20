@@ -35,9 +35,38 @@ Focus on:
 - maintainability
 - coherence between artifacts
 - testing gaps
+- scope discipline
 
 If implementation has not started yet, focus on proposal/design/tasks/execution/spec coherence and likely failure modes.
 If implementation exists, include code/tests/staged specs against the same artifact set.
+
+## Scope and change-discipline checks
+
+Review the change against task-aware bounded change discipline.
+
+Check:
+
+1. whether the implementation matches the task type:
+   - fix
+   - feature
+   - refactor
+   - migration
+2. whether the observed diff is appropriately bounded for that task type
+3. whether unrelated cleanup, abstraction, renaming, or restructuring was folded into the change without justification
+4. whether accepted behavior was preserved when the task was framed as a refactor or migration
+5. whether any behavior changes were made without corresponding updates to task artifacts, specs, or verification
+6. whether `design.md` covers workflow shape adequately when it matters:
+   - workflow inventory
+   - main path
+   - branches and decision points
+   - failure modes and recovery
+   - handoff contracts
+   - verification implications
+7. whether the verification depth is appropriate for the task type:
+   - fixes should prove the defect is resolved
+   - features should prove the new behavior works
+   - refactors should prove behavior parity where expected
+   - migrations should prove sequence safety and integration correctness
 
 ## Output format
 
@@ -45,6 +74,11 @@ If implementation exists, include code/tests/staged specs against the same artif
 - Prioritize as `P1`, `P2`, `P3`.
 - Tie each finding to concrete evidence in code or artifacts.
 - Call out mismatches between proposal, design, tasks, execution graph, staged specs, retrieved knowledge, and implementation.
+- When scope discipline is violated, report it explicitly and distinguish between justified structural change, task-compatible refactor scope, and unjustified scope creep.
+- Use this severity guidance:
+  - `P1`: the change exceeds task scope and changes behavior or introduces material risk
+  - `P2`: the change exceeds the declared refactor or migration scope without clear justification
+  - `P3`: the change includes minor incidental edits or avoidable overreach without material behavior change
 
 ## Optional writeback
 

@@ -20,9 +20,15 @@ Explore the problem, constraints, and likely solution space before committing to
    - use the repo-local `crabyard-research` skill from `.agents/skills/` when available
    - otherwise search `crabyard/knowledge/index.md` and `crabyard/knowledge/` directly
    - keep only the strongest 1-3 prior learnings
-3. Investigate the relevant code, tests, specs, active changes, and retrieved knowledge.
-4. Summarize current behavior, constraints, likely approaches, open questions, and any prior learnings that materially change the decision surface.
-5. Recommend the next move in the two-layer model:
+3. Decide whether an orientation pass is needed before deeper investigation. Do it when the user is asking where to start, what owns a behavior, how the repo is structured, which file to read first, or when the affected surface is still ambiguous.
+4. When an orientation pass is needed, produce a code-grounded repo map before solution analysis:
+   - a one-line summary of what the inspected area is
+   - a five-minute explanation covering primary inputs, outputs, key files, and main code paths
+   - a deeper explanation of entry points, boundaries, and traced execution paths
+   - explicit inspection limits when the answer is partial
+5. Investigate the relevant code, tests, specs, active changes, and retrieved knowledge.
+6. Summarize current behavior, constraints, likely approaches, open questions, and any prior learnings that materially change the decision surface.
+7. Recommend the next move in the two-layer model:
    - move into the core flow with `crabyard-plan` for a formal change bundle
    - use `crabyard-debug` for a bounded bug
    - request `crabyard-review` as an optional gate when risk, ambiguity, or artifact quality should be stress-tested before apply
@@ -32,5 +38,6 @@ Explore the problem, constraints, and likely solution space before committing to
 
 - Do not create a change bundle during explore unless the user explicitly switches to the planning stage with `crabyard-plan`.
 - Do not write application code during explore.
+- Do not force a full onboarding-style orientation when the user intent is already narrow and the relevant surface is clear.
 - Keep the output decision-oriented and evidence-backed.
 - Do not dump every knowledge note you found; prefer the smallest useful retrieval set.

@@ -17,11 +17,17 @@ Debug a concrete problem, gather evidence, and fix it when the scope remains bou
 
 1. Capture the expected behavior, actual behavior, reproduction, and scope.
 2. Reproduce or otherwise gather evidence from logs, tests, and code.
-3. Fix the bounded issue when the intended behavior is already clear.
-4. If the issue expands into a broader behavior change, stop and recommend moving into the planning stage with `plan`.
-5. Recommend `learn` or `refresh` when the result should become durable knowledge.
+3. Treat debug work as behavior-fix-first unless the evidence proves the issue is actually a larger refactor or behavior change.
+4. Prefer the smallest evidence-backed correction that resolves the verified problem.
+5. Do not turn debugging into opportunistic cleanup, abstraction work, or structural redesign.
+6. If the fix requires broader structural change, stop and recommend moving into the planning stage with `plan` unless the current change artifacts already authorize that scope.
+7. After the fix, re-check that the original defect is addressed and unrelated behavior was not changed accidentally.
+8. Record follow-up improvements separately instead of mixing them into the debug patch.
+9. Recommend `learn` or `refresh` when the result should become durable knowledge.
 
 ## Guardrails
 
 - Do not brute-force speculative changes without evidence.
+- Do not use a debug task to smuggle in refactors.
+- Prefer stopping with a scope recommendation over applying a speculative broad fix.
 - Do not turn a broad product change into a debug task just to move faster.
