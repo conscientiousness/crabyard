@@ -1,6 +1,6 @@
 {
   "name": "crabyard",
-  "version": "2026.4.20",
+  "version": "2026.4.23",
   "description": "Spec-driven, review-first Crabyard workflow CLI with explicit execution graphs",
   "keywords": [
     "agents",
