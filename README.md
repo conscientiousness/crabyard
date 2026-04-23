@@ -211,10 +211,8 @@ crabyard/changes/<slug>/
   tasks.md
   execution.yaml
   specs/
-  review.md
 ```
 
-- `review.md` is optional.
 - `execution.yaml` is required.
 - `specs/` is the staged source for accepted-spec updates.
 
@@ -429,7 +427,7 @@ The reusable review layer lives in `crabyard-review` and looks at:
 - execution plan
 - relevant specs
 
-It reports prioritized findings as `P1 / P2 / P3` and can write `crabyard/changes/<slug>/review.md`.
+It reports prioritized findings as `P1 / P2 / P3`. Persist them only when you need a durable review record.
 
 ## How Knowledge Stays Useful
 

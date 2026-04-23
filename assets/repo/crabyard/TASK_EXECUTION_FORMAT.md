@@ -20,10 +20,9 @@ crabyard/changes/<slug>/
   tasks.md
   execution.yaml
   specs/
-  review.md
 ```
 
-`review.md` is optional. `execution.yaml` is not optional.
+`execution.yaml` is not optional.
 
 ## Core Rule
 

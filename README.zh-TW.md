@@ -211,10 +211,8 @@ crabyard/changes/<slug>/
   tasks.md
   execution.yaml
   specs/
-  review.md
 ```
 
-- `review.md` 可有可無
 - `execution.yaml` 一定要有
 - `specs/` 是已接受規格更新的暫存來源
 
@@ -431,7 +429,7 @@ Crabyard 會在 `.agents/skills/` 下安裝一組很小的專案內 skills。任
 - 執行規劃
 - 相關規格
 
-它會用 `P1 / P2 / P3` 輸出優先級，並可寫入 `crabyard/changes/<slug>/review.md`。
+它會用 `P1 / P2 / P3` 輸出優先級。只有需要長期保留審查結果時，才把它寫成檔案。
 
 ## 知識如何持續有用
 

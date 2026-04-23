@@ -3647,7 +3647,6 @@ Required change layout:
   tasks.md
   execution.yaml
   specs/
-  review.md
 \`\`\`
 
 - \`proposal.md\` explains the intent, scope, and acceptance target.
@@ -3655,7 +3654,6 @@ Required change layout:
 - \`tasks.md\` is the human-readable execution checklist.
 - \`execution.yaml\` is the explicit execution graph and must stay trustworthy.
 - \`specs/\` stages accepted-truth updates before \`crabyard sync <change>\`.
-- \`review.md\` is optional but recommended for prioritized findings before verify.
 - Use \`crabyard check <change>\` when you want to execute the normalized verify metadata instead of only checking closure gates.
 `;
 }

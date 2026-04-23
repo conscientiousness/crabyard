@@ -1174,6 +1174,20 @@ test("canonical repo-local skills live only under .agents", async () => {
   await assertPathMissing(join(repoPath, ".codex", "skills", "crabyard-review", "SKILL.md"));
 });
 
+test("archive skill does not prompt agents to read absent review files", async () => {
+  const repoPath = await createInitializedRepo();
+  const archiveSkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-archive", "SKILL.md"), "utf8");
+  const planSkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-plan", "SKILL.md"), "utf8");
+  const changesReadme = await readFile(join(repoPath, "crabyard", "changes", "README.md"), "utf8");
+  const taskFormat = await readFile(join(repoPath, "crabyard", "TASK_EXECUTION_FORMAT.md"), "utf8");
+
+  assert.doesNotMatch(archiveSkill, /review\.md/);
+  assert.match(archiveSkill, /Do not look for a persisted review record by default/i);
+  assert.doesNotMatch(planSkill, /review\.md/);
+  assert.doesNotMatch(changesReadme, /review\.md/);
+  assert.doesNotMatch(taskFormat, /review\.md/);
+});
+
 test("explore, plan, and review skills embed retrieval before deeper work", async () => {
   const repoPath = await createInitializedRepo();
   const exploreSkill = await readFile(join(repoPath, ".agents", "skills", "crabyard-explore", "SKILL.md"), "utf8");

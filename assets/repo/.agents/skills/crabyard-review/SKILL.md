@@ -16,7 +16,8 @@ Review a Crabyard change either before implementation starts or before lifecycle
 7. `crabyard/changes/<slug>/execution.yaml`
 8. relevant files under `crabyard/specs/`
 9. relevant code and tests
-10. `crabyard/changes/<slug>/review.md` if it already exists
+
+Do not probe for a previous persisted review by default. Read one only when the user mentions it or a normal change directory/status listing already shows that it exists.
 
 ## Retrieval pass
 

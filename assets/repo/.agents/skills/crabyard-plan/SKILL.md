@@ -36,8 +36,6 @@ crabyard/changes/<slug>/
   specs/
 ```
 
-`review.md` is optional and should be created later during the review stage, not by default during planning.
-
 ## Workflow
 
 1. Derive or confirm the change slug.

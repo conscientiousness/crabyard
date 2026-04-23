@@ -14,8 +14,9 @@ Archive a completed Crabyard change once implementation and accepted truth are i
 5. `crabyard/changes/<slug>/tasks.md`
 6. `crabyard/changes/<slug>/execution.yaml`
 7. `crabyard/changes/<slug>/specs/`
-8. `crabyard/changes/<slug>/review.md` when present
-9. relevant files under `crabyard/specs/`
+8. relevant files under `crabyard/specs/`
+
+Do not look for a persisted review record by default. Read one only when the user mentions it or a normal change directory/status listing already shows that it exists.
 
 ## Workflow
 
