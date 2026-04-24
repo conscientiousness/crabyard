@@ -50,50 +50,32 @@ npx crabyard@latest --help
 
 ## Quick Start
 
-Once `crabyard` is available on your PATH, start with:
+Once `crabyard` is available on your PATH, human users usually only need the setup and maintenance commands:
 
 ```bash
 crabyard init /absolute/path/to/repo
-crabyard validate --repo /absolute/path/to/repo
-crabyard status --repo /absolute/path/to/repo
-crabyard status add-auth --repo /absolute/path/to/repo --json
-crabyard check add-auth --repo /absolute/path/to/repo
-crabyard verify add-auth --repo /absolute/path/to/repo
-crabyard sync add-auth --repo /absolute/path/to/repo
-crabyard archive add-auth --repo /absolute/path/to/repo
+crabyard refresh /absolute/path/to/repo
 ```
 
-After upgrading the CLI, refresh the repo-local managed assets in an existing repo with:
+Use `init` once to install the repo-local Crabyard structure. After upgrading the CLI, use `refresh` to update replace-safe managed assets such as repo-local skills and the managed `AGENTS.md` routing block.
 
-```bash
-crabyard refresh .
-```
-
-`refresh` updates replace-safe assets such as repo-local skills and the managed `AGENTS.md` routing block, and records the installed CLI version in `crabyard/manifest.yaml` under `managed_by.crabyard_version`. It preserves repo-authored docs like `project.md`, `knowledge/index.md`, `TASK_EXECUTION_FORMAT.md`, and bucket `README.md` files, only recreating them when missing. The legacy `update` command remains available as an alias.
+`refresh` records the installed CLI version in `crabyard/manifest.yaml` under `managed_by.crabyard_version`. It preserves repo-authored docs like `project.md`, `knowledge/index.md`, `TASK_EXECUTION_FORMAT.md`, and bucket `README.md` files, only recreating them when missing. The legacy `update` command remains available as an alias.
 
 Add `--backup` only if you want replaced managed files copied into `.crabyard/backups/` before refresh.
 
-If the repo already uses OpenSpec, migrate the existing specs and change bundles with:
+In Codex, opencode, or another agent CLI that supports repo-local Skills, ask the agent to use the Crabyard skills instead of driving every CLI command by hand:
 
-```bash
-crabyard migrate openspec /absolute/path/to/repo
-```
+- `crabyard-research` to retrieve prior project knowledge before major decisions
+- `crabyard-explore` to inspect the repo and shape the change
+- `crabyard-plan` to create or update `crabyard/changes/<slug>/`
+- `crabyard-apply` to implement ready units from the execution frontier
+- `crabyard-review` to review the plan or implementation
+- `crabyard-archive` to close a verified, sync-coherent change
+- `crabyard-debug`, `crabyard-learn`, and `crabyard-refresh` when debugging or maintaining project knowledge
 
-This keeps the original `openspec/` tree in place, copies supported artifacts into `crabyard/`, and generates placeholder `execution.yaml` files for migrated change bundles.
-
-A normal first loop looks like this:
-
-1. `crabyard init /absolute/path/to/repo`
-2. ask your agent tool to create `crabyard/changes/<slug>/`
-3. let the agent write `proposal.md`, `design.md`, `tasks.md`, `execution.yaml`
-4. run `crabyard validate change <slug> --repo /absolute/path/to/repo`
-5. let the agent use `crabyard status <slug> --repo /absolute/path/to/repo --json`
-6. implement from the ready frontier
-7. run `check`, `verify`, `sync`, `verify`, `archive`
+One complete change loop still uses `check`, `verify`, `sync`, and `archive`; the skills handle that loop with the CLI as the source of truth.
 
 If you prefer `npx`, replace `crabyard` in the examples above with `npx crabyard@latest`.
-
-Any agent tool that supports repo-local Skills can use this workflow.
 
 Crabyard started from a simple observation: once you use coding agents seriously, the hard part is usually not getting them to write code. The hard part is keeping the repo understandable from one session to the next.
 
@@ -152,26 +134,6 @@ The point is not documentation for its own sake. The point is to make agents mor
 The most important design choice is explicit execution graphs in `execution.yaml`. `tasks.md` stays readable for humans, while scheduling, dependencies, write ownership, and verification metadata stay machine-checkable.
 
 Crabyard was influenced by projects like Compound Engineering and OpenSpec. The difference is mostly one of scope: Crabyard stays deliberately smaller, keeps context inside the repo, and focuses on a simpler execution contract that is easier to carry forward as the project evolves.
-
-## Workflow
-
-The workflow uses a two-layer model on purpose: keep the core loop short, and treat the rest as conditional helpers.
-
-```text
-explore -> plan -> apply -> verify -> archive
-```
-
-Conditional helpers:
-
-- run knowledge retrieval before major decisions in explore, plan, and review
-- use review as an optional gate before apply or before closure when risk, ambiguity, or findings warrant it
-- run `sync` and re-verify only when staged specs change accepted truth
-- use `learn` or `refresh` only when durable knowledge should change
-
-- `AGENTS.md` is the canonical repo-instruction file.
-- accepted truth lives in `crabyard/specs/`
-- in-flight accepted-truth edits live in `crabyard/changes/<slug>/specs/`
-- durable implementation and debugging knowledge lives in `crabyard/knowledge/`
 
 ## What Gets Added To A Repo
 
@@ -269,19 +231,7 @@ That split is deliberate: skills stay thin, and the CLI remains the source of tr
 
 ## How It Fits Into A Real Session
 
-The easiest way to think about Crabyard is as shared working memory that sits next to your normal agent workflow. The difference is that the repo now has a clean place for the plan, the frontier, and the closure rules.
-
-Typical setup:
-
-```text
-1. You ask your agent tool for a feature or fix
-2. The agent creates or updates crabyard/changes/<slug>/
-3. The agent reads tasks.md + execution.yaml instead of guessing execution order
-4. The agent uses status --json to decide what is ready now
-5. The agent implements, reviews, verifies, syncs, and archives against explicit gates
-```
-
-A practical interaction loop looks like this:
+The easiest way to think about Crabyard is as shared working memory that sits next to your normal agent workflow. A practical interaction loop looks like this:
 
 ```text
 You: add OAuth login
