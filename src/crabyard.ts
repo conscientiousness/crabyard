@@ -62,6 +62,8 @@ import {
   VerifyCommandCheck,
 } from "./execution.js";
 
+const KNOWLEDGE_NON_NOTE_BASENAMES = new Set(["index.md", "README.md"]);
+
 const manifestSchema = z
   .object({
     root: z.string().trim().min(1).optional(),
@@ -98,8 +100,13 @@ const nonEmptyStringArraySchema = z.array(z.string().trim().min(1));
 
 const knowledgeFrontmatterSchema = z
   .object({
+    title: z.string().trim().min(1).optional(),
+    type: z.string().trim().min(1).optional(),
+    summary: z.string().trim().min(1).optional(),
     kind: z.string().trim().min(1).optional(),
     tags: nonEmptyStringArraySchema.optional(),
+    aliases: nonEmptyStringArraySchema.optional(),
+    concepts: nonEmptyStringArraySchema.optional(),
     paths: nonEmptyStringArraySchema.optional(),
     related_specs: nonEmptyStringArraySchema.optional(),
     related_changes: nonEmptyStringArraySchema.optional(),
@@ -349,8 +356,13 @@ type KnowledgeLintReport = {
 };
 
 type KnowledgeFrontmatter = {
+  title?: string;
+  type?: string;
+  summary?: string;
   kind?: string;
   tags?: string[];
+  aliases?: string[];
+  concepts?: string[];
   paths?: string[];
   related_specs?: string[];
   related_changes?: string[];
@@ -1963,7 +1975,7 @@ async function listSpecEntries(context: RepoContext): Promise<string[]> {
 }
 
 async function listKnowledgeEntries(context: RepoContext): Promise<string[]> {
-  const files = await listMarkdownFiles(context.knowledgeRootPath, new Set(["index.md"]));
+  const files = await listMarkdownFiles(context.knowledgeRootPath, KNOWLEDGE_NON_NOTE_BASENAMES);
   return files.map((filePath) => relative(context.repoPath, filePath));
 }
 
@@ -2784,7 +2796,7 @@ async function buildSearchReport(context: RepoContext, query: string, includeSpe
   const results: SearchResult[] = [];
   const knowledgeEntries = await loadKnowledgeIndexEntries(context);
   const knowledgeEntryByPath = new Map(knowledgeEntries.map((entry) => [entry.targetPath, entry]));
-  const knowledgeNotes = await listMarkdownFiles(context.knowledgeRootPath, new Set(["index.md"]));
+  const knowledgeNotes = await listMarkdownFiles(context.knowledgeRootPath, KNOWLEDGE_NON_NOTE_BASENAMES);
 
   for (const notePath of knowledgeNotes) {
     const repoRelativePath = relative(context.repoPath, notePath).replace(/\\/g, "/");
@@ -2796,6 +2808,7 @@ async function buildSearchReport(context: RepoContext, query: string, includeSpe
       path: repoRelativePath,
       pathForMatch: relative(context.knowledgeRootPath, notePath).replace(/\\/g, "/"),
       body: parsed.body,
+      frontmatter: parsed.frontmatter,
       indexEntry,
     });
 
@@ -2849,7 +2862,7 @@ async function buildSearchReport(context: RepoContext, query: string, includeSpe
 
 async function buildKnowledgeLintReport(context: RepoContext): Promise<KnowledgeLintReport> {
   const findings: KnowledgeLintFinding[] = [];
-  const noteFiles = await listMarkdownFiles(context.knowledgeRootPath, new Set(["index.md"]));
+  const noteFiles = await listMarkdownFiles(context.knowledgeRootPath, KNOWLEDGE_NON_NOTE_BASENAMES);
   const indexEntries = await loadKnowledgeIndexEntries(context);
   const indexTargets = new Map<string, number>();
 
@@ -2958,8 +2971,19 @@ async function loadKnowledgeIndexEntries(context: RepoContext): Promise<Knowledg
   const content = await readFile(context.knowledgeIndexPath, "utf8");
   const entries: KnowledgeIndexEntry[] = [];
   const indexDir = dirname(context.knowledgeIndexPath);
+  let inFence = false;
 
   for (const line of content.split(/\r?\n/)) {
+    const trimmedLine = line.trim();
+    if (trimmedLine.startsWith("```") || trimmedLine.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+
+    if (inFence) {
+      continue;
+    }
+
     const match = line.match(/^\s*-\s+\[([^\]]+)\]\(([^)]+)\)(?:\s+-\s*(.*))?$/);
     if (!match) {
       continue;
@@ -3030,6 +3054,7 @@ function rankSearchTarget(args: {
   path: string;
   pathForMatch: string;
   body: string;
+  frontmatter?: KnowledgeFrontmatter | null;
   indexEntry?: KnowledgeIndexEntry;
 }): { score: number; reason: SearchResult["reason"]; summary: string } | null {
   const normalizedPath = args.pathForMatch.toLowerCase();
@@ -3051,15 +3076,20 @@ function rankSearchTarget(args: {
     };
   }
 
-  if (args.indexEntry) {
-    const indexText = `${args.indexEntry.tags.join(" ")} ${args.indexEntry.summary}`.toLowerCase();
-    if (args.query && indexText.includes(args.query)) {
-      return {
-        score: 200,
-        reason: "index",
-        summary: args.indexEntry.summary || `index tags: ${args.indexEntry.tags.join(", ")}`,
-      };
-    }
+  const metadataText = [
+    args.indexEntry ? `${args.indexEntry.tags.join(" ")} ${args.indexEntry.summary}` : "",
+    buildKnowledgeFrontmatterSearchText(args.frontmatter),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (args.query && metadataText.includes(args.query)) {
+    return {
+      score: 200,
+      reason: "index",
+      summary: args.indexEntry?.summary || args.frontmatter?.summary || "frontmatter metadata matches query",
+    };
   }
 
   const bodyLine = args.body
@@ -3077,6 +3107,40 @@ function rankSearchTarget(args: {
   return null;
 }
 
+function buildKnowledgeFrontmatterSearchText(frontmatter?: KnowledgeFrontmatter | null): string {
+  if (!frontmatter) {
+    return "";
+  }
+
+  const values: string[] = [];
+  appendSearchValue(values, frontmatter.title);
+  appendSearchValue(values, frontmatter.type);
+  appendSearchValue(values, frontmatter.summary);
+  appendSearchValue(values, frontmatter.kind);
+  appendSearchValue(values, frontmatter.tags);
+  appendSearchValue(values, frontmatter.aliases);
+  appendSearchValue(values, frontmatter.concepts);
+  appendSearchValue(values, frontmatter.paths);
+  appendSearchValue(values, frontmatter.related_specs);
+  appendSearchValue(values, frontmatter.related_changes);
+  appendSearchValue(values, frontmatter.supersedes);
+
+  return values.join(" ");
+}
+
+function appendSearchValue(values: string[], value: string | string[] | undefined) {
+  if (!value) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    values.push(...value);
+    return;
+  }
+
+  values.push(value);
+}
+
 function printJson(io: CliIO, value: unknown) {
   io.stdout(JSON.stringify(value, null, 2));
 }
@@ -3089,7 +3153,7 @@ async function findSpecFile(context: RepoContext, name: string): Promise<string>
 }
 
 async function findKnowledgeFile(context: RepoContext, name: string): Promise<string> {
-  return findMarkdownArtifact(context.knowledgeRootPath, name, new Set(["index.md"]), [
+  return findMarkdownArtifact(context.knowledgeRootPath, name, KNOWLEDGE_NON_NOTE_BASENAMES, [
     join(context.knowledgeRootPath, `${name}.md`),
   ]);
 }
@@ -3675,7 +3739,7 @@ Rules:
 - Update entries when a note is consolidated, replaced, or superseded.
 - Prefer focused notes over broad catch-all documents.
 - Keep tags and summaries specific enough that retrieval can rank strong matches quickly.
-- Optional note frontmatter may include \`kind\`, \`tags\`, \`paths\`, \`related_specs\`, \`related_changes\`, \`supersedes\`, and \`last_verified_at\`.
+- Optional note frontmatter may include \`kind\`, \`tags\`, \`aliases\`, \`concepts\`, \`paths\`, \`related_specs\`, \`related_changes\`, \`supersedes\`, and \`last_verified_at\`.
 
 ## Entries
 

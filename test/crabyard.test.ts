@@ -1130,6 +1130,33 @@ test("search prefers path matches and can include specs", async () => {
   assert.equal(specPayload.results[0].path, "crabyard/specs/auth.md");
 });
 
+test("search uses knowledge frontmatter aliases and concepts", async () => {
+  const repoPath = await createInitializedRepo();
+  await writeKnowledgeNote(
+    repoPath,
+    "pulse-replay.md",
+    `---
+aliases:
+  - laggy replay
+concepts:
+  - scrub performance
+---
+
+# Pulse Replay
+
+Timeline scrub guardrails.
+`,
+  );
+  await writeKnowledgeIndex(repoPath, "- [Pulse Replay](./pulse-replay.md) - tags: `pulse`; summary: timeline guardrails.\n");
+
+  const result = await run(repoPath, ["search", "laggy replay", "--repo", repoPath, "--json"]);
+  assert.equal(result.code, 0, result.stderr);
+  const payload = parseJson(result.stdout);
+
+  assert.equal(payload.results[0].path, "crabyard/knowledge/pulse-replay.md");
+  assert.equal(payload.results[0].reason, "index");
+});
+
 test("lint knowledge detects index gaps and invalid frontmatter paths", async () => {
   const repoPath = await createInitializedRepo();
   await writeKnowledgeNote(
@@ -1164,6 +1191,18 @@ paths:
     "index-target-missing",
     "note-missing-index",
   ]);
+});
+
+test("lint knowledge ignores README guides and fenced index examples", async () => {
+  const repoPath = await createInitializedRepo();
+  await writeKnowledgeNote(repoPath, "README.md", "# Knowledge\n\nGuide for knowledge notes.\n");
+
+  const result = await run(repoPath, ["lint", "knowledge", "--repo", repoPath, "--json"]);
+  assert.equal(result.code, 0, result.stderr);
+  const payload = parseJson(result.stdout);
+
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.findings, []);
 });
 
 test("canonical repo-local skills live only under .agents", async () => {

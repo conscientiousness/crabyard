@@ -55,7 +55,7 @@ export type ListTarget = "all" | "specs" | "changes" | "knowledge";
 
 export const PRODUCT_NAME = "Crabyard";
 export const PACKAGE_NAME = "crabyard";
-export const PACKAGE_VERSION = "2026.4.23";
+export const PACKAGE_VERSION = "2026.4.24";
 export const BACKUP_DIRNAME = ".crabyard";
 export const ROOT_DIRNAME = "crabyard";
 export const MANIFEST_FILE = "manifest.yaml";

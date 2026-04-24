@@ -435,6 +435,8 @@ Crabyard keeps implementation and debugging notes in `crabyard/knowledge/`, but 
 
 - `crabyard-research` returns the strongest 1-3 prior learnings before planning, review, or debugging
 - `crabyard-learn` checks overlap before creating a note and updates `knowledge/index.md`
-- `crabyard-refresh` supports targeted refresh, consolidation, replacement, and stale marking
-- optional note frontmatter can add `kind`, `tags`, `paths`, `related_specs`, `related_changes`, `supersedes`, and `last_verified_at`
+- `crabyard-refresh` supports targeted refresh, consolidation, replacement, stale marking, and conservative old-repo cleanup
+- optional note frontmatter can add `kind`, `tags`, `aliases`, `concepts`, `paths`, `related_specs`, `related_changes`, `supersedes`, and `last_verified_at`
 - `knowledge/index.md` stays retrieval-friendly and canonical
+
+For existing repos, run the CLI command `crabyard refresh <repo>` to update managed repo-local skills. That command does not rewrite repo-authored knowledge. If older knowledge needs cleanup, invoke the `crabyard-refresh` skill with a narrow scope so the agent can update only stale or duplicated retrieval targets.
